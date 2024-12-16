@@ -145,6 +145,10 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error building JIT daily map: %w", err)
 	}
 
+	if len(jitDailyPlan) == 0 || len(jitDailyMap) == 0 {
+		return nil, fmt.Errorf("jitPlan or jitLine not found (%w)", err)
+	}
+
 	bomMats := []string{}
 	bomMatCheck := map[string]bool{}
 	for _, jitLines := range jitDailyMap {
@@ -1082,17 +1086,23 @@ func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]Adjus
 							requireLineMap[lineCode][linePlan] = requireJitLine
 						}
 
-						for _, productionJitLine := range jitDate.Lines {
+						remainRequire := requireQty
+						for i, productionJitLine := range jitDate.Lines {
 							productionId := productionJitLine.id
 							lineCode := productionJitLine.LineCode
 							planId := productionJitLine.PlanId
+							requireLine := productionJitLine.ProductionQty
 							linePlan := createLinePlanKey(lineCode, planId)
 							lineBlank := createLinePlanKey(lineCode, nil)
 
+							if remainRequire < requireLine || i+1 == len(jitDate.Lines) {
+								requireLine = remainRequire
+							}
+
 							if _, planExist := requireLineMap[lineCode][linePlan]; planExist {
-								updateJitLineQty(jitMats[cMat].JitDates[current].Lines, lineCode, planId, productionId, requireQty, isUrgent)
+								updateJitLineQty(jitMats[cMat].JitDates[current].Lines, lineCode, planId, productionId, requireLine, isUrgent)
 							} else if _, blankExist := requireLineMap[lineCode][lineBlank]; blankExist {
-								updateJitLineQty(jitMats[cMat].JitDates[current].Lines, lineCode, nil, productionId, requireQty, isUrgent)
+								updateJitLineQty(jitMats[cMat].JitDates[current].Lines, lineCode, nil, productionId, requireLine, isUrgent)
 							} else {
 								newJitLine := JitLine{
 									id:                  maxId,
@@ -1113,13 +1123,19 @@ func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]Adjus
 								}
 
 								if isUrgent {
-									newJitLine.UrgenQty = requireQty
+									newJitLine.UrgenQty = requireLine
 								} else {
-									newJitLine.RequireQty = requireQty
+									newJitLine.RequireQty = requireLine
 								}
 
 								jitMats[cMat].JitDates[current].Lines = append(jitMats[cMat].JitDates[current].Lines, newJitLine)
 								maxId++
+							}
+
+							remainRequire -= requireLine
+
+							if remainRequire <= 0 {
+								break
 							}
 						}
 					} else {
