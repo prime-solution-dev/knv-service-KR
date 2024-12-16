@@ -1,0 +1,51 @@
+package routes
+
+import (
+	inventoryService "jnv-jit/internal/services/inventory-service"
+	jitInboundService "jnv-jit/internal/services/jit-inbound-service"
+	"jnv-jit/internal/services/kanbanService"
+	"jnv-jit/internal/services/reportService"
+	testservice "jnv-jit/internal/services/testService"
+	"jnv-jit/internal/utils"
+
+	"github.com/gin-gonic/gin"
+)
+
+func init() {
+}
+
+func RegisterRoutes(router *gin.Engine) {
+
+	router.POST("/JIT/GetDashboardOverall", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, reportService.GetDashboardOverall)
+	})
+
+	router.POST("/JIT/GetNonMoveMaterial", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, reportService.GetNonMoveMaterial)
+	})
+
+	router.POST("/JIT/GetDashboardSummary", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, reportService.GetDashboardSummary)
+	})
+
+	router.POST("/JITKanban/GetDashboardSummary", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, kanbanService.GetDashboardSummary)
+	})
+
+	router.POST("/Test/ExtractUpdates", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, testservice.TestExtractUpdates)
+	})
+
+	router.POST("/Inventory/UpdateInventory", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, inventoryService.UpdateInventory)
+	})
+
+	router.POST("/JITInbound/UploadPipelineKr", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, jitInboundService.UploadPlanPipelineKr)
+	})
+
+	router.POST("/JITInbound/UploadPlan", func(c *gin.Context) {
+		utils.ProcessRequestMultiPart(c, jitInboundService.UploadPlan)
+	})
+
+}
