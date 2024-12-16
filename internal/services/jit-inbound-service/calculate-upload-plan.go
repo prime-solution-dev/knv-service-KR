@@ -863,40 +863,40 @@ func BuildToCalStruct(jitLineMap map[string][]JitLine, matStock []MaterialStock)
 }
 
 func GetLastEndStockMaterial(sqlx *sqlx.DB, materialCodes []string, startCalDate time.Time) (map[string]Material, error) {
-	//todo get data from db and check condition(dataDate < startCalDate) for last stock
+	// comment for test
 	lastStockMat := map[string]Material{}
 
-	query := `
-		select m.material_id ,m.material_code , m.supplier_id, m.pallet_pattern
-		,  coalesce(s.supplier_code , '') as supplier_code, jd.end_of_stock
-		from materials m
-		left join suppliers s on m.supplier_id  = s.supplier_id
-		left join (select * from jit_daily order by jit_daily_id desc) jd on jd.material_id = m.material_id
-		where m.is_deleted = false
-	`
-	rows, err := db.ExecuteQuery(sqlx, query)
-	if err != nil {
-		return nil, err
-	}
+	// query := `
+	// 	select m.material_id ,m.material_code , m.supplier_id, m.pallet_pattern
+	// 	,  coalesce(s.supplier_code , '') as supplier_code, jd.end_of_stock
+	// 	from materials m
+	// 	left join suppliers s on m.supplier_id  = s.supplier_id
+	// 	left join (select * from jit_daily order by jit_daily_id desc) jd on jd.material_id = m.material_id
+	// 	where m.is_deleted = false
+	// `
+	// rows, err := db.ExecuteQuery(sqlx, query)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	for _, item := range rows {
-		materialId := item["material_id"].(int64)
-		materialCode := item["material_code"].(string)
-		supplierId := item["supplier_id"].(int64)
-		supplierCode := item["supplier_code"].(string)
-		palletPattern := item["pallet_pattern"].(float64)
-		qty := item["end_of_stock"].(float64)
+	// for _, item := range rows {
+	// 	materialId := item["material_id"].(int64)
+	// 	materialCode := item["material_code"].(string)
+	// 	supplierId := item["supplier_id"].(int64)
+	// 	supplierCode := item["supplier_code"].(string)
+	// 	palletPattern := item["pallet_pattern"].(float64)
+	// 	qty := item["end_of_stock"].(float64)
 
-		key := materialCode
-		lastStockMat[key] = Material{
-			MaterialId:    materialId,
-			MaterialCode:  materialCode,
-			SupplierId:    supplierId,
-			SupplierCode:  supplierCode,
-			PalletPattern: &palletPattern,
-			Qty:           qty,
-		}
-	}
+	// 	key := materialCode
+	// 	lastStockMat[key] = Material{
+	// 		MaterialId:    materialId,
+	// 		MaterialCode:  materialCode,
+	// 		SupplierId:    supplierId,
+	// 		SupplierCode:  supplierCode,
+	// 		PalletPattern: &palletPattern,
+	// 		Qty:           qty,
+	// 	}
+	// }
 
 	return lastStockMat, nil
 }
