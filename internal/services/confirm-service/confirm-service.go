@@ -183,7 +183,7 @@ func AllocateConfirm(req []ConfirmRequest, confirmDataMap ConfirmDataList) (Conf
 
 func UpdateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinMatDate, error) {
 	result := []ConfirmMinMatDate{}
-	// resultAddList := make(map[string]bool)
+	resultAddList := make(map[string]bool)
 
 	tx := gorm.Begin()
 
@@ -203,13 +203,13 @@ func UpdateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinM
 				return nil, err
 			}
 
-			// if _, exists := resultAddList[confirmItem.MaterialCode]; !exists {
-			result = append(result, ConfirmMinMatDate{
-				MinDate:   confirmItem.ConfirmDate.AddDate(0, 0, -1),
-				Materials: confirmItem.MaterialCode,
-			})
-			// resultAddList[confirmItem.MaterialCode] = true
-			// }
+			if _, exists := resultAddList[confirmItem.MaterialCode]; !exists {
+				result = append(result, ConfirmMinMatDate{
+					MinDate:   confirmItem.ConfirmDate.AddDate(0, 0, -1),
+					Materials: confirmItem.MaterialCode,
+				})
+				resultAddList[confirmItem.MaterialCode] = true
+			}
 		}
 	}
 
