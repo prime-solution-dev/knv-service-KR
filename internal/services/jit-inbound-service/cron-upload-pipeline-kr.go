@@ -32,8 +32,11 @@ func init() {
 }
 
 func UploadPlanPipelineKrCron() {
+	sqlx, _ := db.ConnectSqlx(`jit_portal`)
+	defer sqlx.Close()
+
 	startFileDate := time.Now().Truncate(24 * time.Hour)
-	startCalDate := time.Now().Truncate(24 * time.Hour)
+	startCalDate := GetStartCalDate(sqlx).Truncate(24 * time.Hour)
 	stockPath := `/Users/m4ru/Documents/Work/Prime/FileTest/JIT`
 	stockPrefixFile := `LX02_`
 	planPath := `/Users/m4ru/Documents/Work/Prime/FileTest/JIT`
@@ -123,7 +126,7 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 
 		sql += " END "
 		// sql += " , updated_by = 0, updated_date = now()"
-		sql += "  WHERE materila_code IN (?) "
+		sql += "  WHERE material_code IN (?) "
 
 		ids = append(ids, condition)
 
@@ -218,7 +221,7 @@ func ReadPlan(datas []map[string]interface{}, matStockMap map[string]MaterialSto
 	for _, data := range datas {
 		materialCode := data["Col2"].(string)
 		lineCode := ""
-		subconStockQtyStr := data["Col10"].(string)
+		subconStockQtyStr := data["Col9"].(string)
 		condition := data["Col11"].(string)
 		numColumns := len(data) //todo ทำไมมันขาดไปอัน
 		startCol := 11

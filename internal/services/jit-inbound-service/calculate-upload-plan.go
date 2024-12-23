@@ -21,6 +21,7 @@ type UploadPlanRequest struct {
 	StartCal           time.Time       `json:"start_cal"`
 	IsBom              bool            `json:"is_bom"`
 	IsCheckFg          bool            `json:"is_check_fg"`
+	IsInitPlaned       bool            `json:"is_init_planed"`
 	IsUrgentByStockDif bool            `json:"is_urgent_by_stock_dif"`
 	MaterialStocks     []MaterialStock `json:"material_stocks"`
 	RequestPlan        []RequestPlan   `json:"request_plan"`
@@ -174,7 +175,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error merge jit daily: %w", err)
 	}
 
-	jitMats, confirmMap, materialCodes, lineCodes, maxLineId, err := BuildToCalStruct(jitDailyMap, reqMatStock)
+	jitMats, confirmMap, materialCodes, lineCodes, maxLineId, err := BuildToCalStruct(req.StartCal, jitDailyMap, reqMatStock)
 	if err != nil {
 		return nil, fmt.Errorf("error build cal struct: %w", err)
 	}
@@ -185,7 +186,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 			return nil, fmt.Errorf("error get last end stock: %w", err)
 		}
 
-		jitMats, err = CalculateUrgentStockDiff(jitMats, lastEndStockMat)
+		jitMats, err = CalculateUrgentStockDiff(jitMats, lastEndStockMat, startDate)
 		if err != nil {
 			return nil, fmt.Errorf("error cal urgent stock diff: %w", err)
 		}
@@ -359,8 +360,10 @@ func BuildJitDaily(startDate time.Time, endDate time.Time, matLineMap map[string
 
 	for currentDate := startDate; !currentDate.After(endDate); currentDate = currentDate.Add(24 * time.Hour) {
 		for _, mat := range matLineMap {
+
 			for _, matLine := range mat {
 				planDateStr := currentDate.Format("2006-01-02")
+
 				materialCode := matLine.MaterialCode
 				lineCode := matLine.LineCode
 				jitLineKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, materialCode, lineCode)
@@ -505,6 +508,8 @@ func BuildJitDaily(startDate time.Time, endDate time.Time, matLineMap map[string
 func GetJitDailyDB(sqlx *sqlx.DB, startDate time.Time, matStrs []string) (map[string][]JitLine, error) {
 	jitDailyMap := map[string][]JitLine{}
 
+	startCalDate := startDate.Format("2006-01-02")
+
 	query := fmt.Sprintf(`
 		select jd.jit_daily_id as id
 			, jd.jit_daily_plan_id  as plan_id
@@ -528,9 +533,9 @@ func GetJitDailyDB(sqlx *sqlx.DB, startDate time.Time, matStrs []string) (map[st
 		left join jit_line_headers jlh on jld.line_header_id = jlh.line_header_id 
 		where 1=1
 		and jd.is_deleted = false
-		and jd.daily_date >= '%s'
+		and (jd.daily_date >= '%s' or jd.conf_date >= '%s' or jd.conf_urgent_date >= '%s')
 		and m.material_code in ('%s')
-	`, startDate.Format("2006-01-02"), strings.Join(matStrs, `','`))
+	`, startCalDate, startCalDate, startCalDate, strings.Join(matStrs, `','`))
 	//println(query)
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
@@ -689,7 +694,7 @@ func MergeJitDaily(jitLineMap map[string][]JitLine, jitLineDBMap map[string][]Ji
 	return jitLineMap, nil
 }
 
-func BuildToCalStruct(jitLineMap map[string][]JitLine, matStock []MaterialStock) ([]JitMaterial, map[string][]JitDate, []string, []string, int64, error) {
+func BuildToCalStruct(startCal time.Time, jitLineMap map[string][]JitLine, matStock []MaterialStock) ([]JitMaterial, map[string][]JitDate, []string, []string, int64, error) {
 	jitMats := []JitMaterial{}
 	matStockMap := map[string]MaterialStock{}
 	confirmJitDateMap := map[string][]JitDate{}
@@ -789,14 +794,18 @@ func BuildToCalStruct(jitLineMap map[string][]JitLine, matStock []MaterialStock)
 
 			if confirmRequireDate != nil || confirmUrgentDate != nil {
 				if confirmRequireDate != nil {
-					key := fmt.Sprintf("%s|%s", confirmRequireDate.Format("2006-01-02"), "R")
+					key := fmt.Sprintf("%s|%s|%s", materialCode, confirmRequireDate.Format("2006-01-02"), "R")
 					confirmJitDateMap[key] = append(confirmJitDateMap[key], newJitDate)
 				}
 
 				if confirmUrgentDate != nil {
-					key := fmt.Sprintf("%s|%s", confirmUrgentDate.Format("2006-01-02"), "U")
+					key := fmt.Sprintf("%s|%s|%s", materialCode, confirmUrgentDate.Format("2006-01-02"), "U")
 					confirmJitDateMap[key] = append(confirmJitDateMap[key], newJitDate)
 				}
+			}
+
+			if planDate.Before(startCal) {
+				continue
 			}
 
 			isFoundMat := false
@@ -867,57 +876,62 @@ func BuildToCalStruct(jitLineMap map[string][]JitLine, matStock []MaterialStock)
 }
 
 func GetLastEndStockMaterial(sqlx *sqlx.DB, materialCodes []string, startCalDate time.Time) (map[string]Material, error) {
-	// comment for test
 	lastStockMat := map[string]Material{}
 
-	// query := `
-	// 	select m.material_id ,m.material_code , m.supplier_id, m.pallet_pattern
-	// 	,  coalesce(s.supplier_code , '') as supplier_code, jd.end_of_stock
-	// 	from materials m
-	// 	left join suppliers s on m.supplier_id  = s.supplier_id
-	// 	left join (select * from jit_daily order by jit_daily_id desc) jd on jd.material_id = m.material_id
-	// 	where m.is_deleted = false
-	// `
-	// rows, err := db.ExecuteQuery(sqlx, query)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	query := `
+		select
+			coalesce(jd.daily_date, '1990-01-01') daily_date,
+			coalesce(m.material_id, 0) material_id,
+			coalesce(m.material_code, '') material_code,
+			coalesce(m.supplier_id, 0) supplier_id,
+			coalesce(m.pallet_pattern, 0) pallet_pattern,
+			coalesce(s.supplier_code , '') supplier_code,
+			coalesce(jd.end_of_stock, 0) end_of_stock
+		from materials m
+		left join suppliers s on m.supplier_id  = s.supplier_id
+		left join (select * from jit_daily where is_deleted = false order by jit_daily_id desc) jd on jd.material_id = m.material_id
+		where m.is_deleted = false
+	`
+	rows, err := db.ExecuteQuery(sqlx, query)
+	if err != nil {
+		return nil, err
+	}
 
-	// for _, item := range rows {
-	// 	materialId := item["material_id"].(int64)
-	// 	materialCode := item["material_code"].(string)
-	// 	supplierId := item["supplier_id"].(int64)
-	// 	supplierCode := item["supplier_code"].(string)
-	// 	palletPattern := item["pallet_pattern"].(float64)
-	// 	qty := item["end_of_stock"].(float64)
+	for _, item := range rows {
+		date := item["daily_date"].(time.Time)
+		materialId := item["material_id"].(int64)
+		materialCode := item["material_code"].(string)
+		supplierId := item["supplier_id"].(int64)
+		supplierCode := item["supplier_code"].(string)
+		palletPattern := item["pallet_pattern"].(float64)
+		qty := item["end_of_stock"].(float64)
 
-	// 	key := materialCode
-	// 	lastStockMat[key] = Material{
-	// 		MaterialId:    materialId,
-	// 		MaterialCode:  materialCode,
-	// 		SupplierId:    supplierId,
-	// 		SupplierCode:  supplierCode,
-	// 		PalletPattern: &palletPattern,
-	// 		Qty:           qty,
-	// 	}
-	// }
+		key := fmt.Sprintf("%s|%s", materialCode, date.Format("2006-01-02"))
+		lastStockMat[key] = Material{
+			MaterialId:    materialId,
+			MaterialCode:  materialCode,
+			SupplierId:    supplierId,
+			SupplierCode:  supplierCode,
+			PalletPattern: &palletPattern,
+			Qty:           qty,
+		}
+	}
 
 	return lastStockMat, nil
 }
 
-func CalculateUrgentStockDiff(jitMats []JitMaterial, lastEndStockMatMap map[string]Material) ([]JitMaterial, error) {
-	for cMat := range jitMats {
-		jitMat := &jitMats[cMat]
+func CalculateUrgentStockDiff(jitMats []JitMaterial, lastEndStockMatMap map[string]Material, startCalDate time.Time) ([]JitMaterial, error) {
+	for i := range jitMats {
+		jitMat := &jitMats[i]
 		materialCode := jitMat.MaterialCode
-		var palletPattern float64 = 0
 
-		for cDate := range jitMats[cMat].JitDates {
-			jitDate := jitMat.JitDates[cDate]
+		for cDate := range jitMat.JitDates {
+			jitDate := &jitMat.JitDates[cDate]
 			lastEndStockMatQty := 0.0
+			palletPattern := 0.0
 
-			lastEndStockMatKey := materialCode
-			lastEndStockMat, lastStockExist := lastEndStockMatMap[lastEndStockMatKey]
-			if lastStockExist {
+			lastEndStockMatKey := fmt.Sprintf("%s|%s", materialCode, jitDate.Date.AddDate(0, 0, -1).Format("2006-01-02"))
+			if lastEndStockMat, exists := lastEndStockMatMap[lastEndStockMatKey]; exists {
 				lastEndStockMatQty = lastEndStockMat.Qty
 				palletPattern = *lastEndStockMat.PalletPattern
 			}
@@ -932,11 +946,11 @@ func CalculateUrgentStockDiff(jitMats []JitMaterial, lastEndStockMatMap map[stri
 					jitDate.UrgentQty = requireQty
 
 					//first line
-					for _, jitLine := range jitDate.Lines {
+					for j := range jitDate.Lines {
+						jitLine := &jitDate.Lines[j]
 						jitLine.UrgenQty = requireQty
 						jitLine.IsStockDiffQty = requireQty
 						jitLine.IsStockDiff = true
-
 						break
 					}
 				}
@@ -1044,26 +1058,35 @@ func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]Adjus
 				startUpdateData := currentDateCount - leadTime
 
 				shortDay := ""
-
 				if startUpdateData >= 0 {
 					shortDay = utils.GetShortWeekday(jitMats[cMat].JitDates[startUpdateData].Date)
 				} else {
 					shortDay = utils.GetShortWeekday(time.Now())
 				}
 
+				// shortDay = utils.GetShortWeekday(jitMats[cMat].JitDates[startUpdateData].Date)
 				adjustLeadtimeKey := shortDay
 				adjustLeadtime, adjustLeadtimeExist := adjustLeadtimeMap[adjustLeadtimeKey]
+
+				// if startUpdateData < 0 {
+				// 	startUpdateData = 0
+				// 	isUrgent = true
+				// } else if adjustLeadtimeExist {
+				// 	startUpdateData += adjustLeadtime.Adjust
+
+				// 	if startUpdateData < 0 {
+				// 		startUpdateData = 0
+				// 		isUrgent = true
+				// 	}
+				// }
+
+				if adjustLeadtimeExist {
+					startUpdateData += adjustLeadtime.Adjust
+				}
 
 				if startUpdateData < 0 {
 					startUpdateData = 0
 					isUrgent = true
-				} else if adjustLeadtimeExist {
-					startUpdateData += adjustLeadtime.Adjust
-
-					if startUpdateData < 0 {
-						startUpdateData = 0
-						isUrgent = true
-					}
 				}
 
 				for current := startUpdateData; current <= currentDateCount; current++ {
@@ -1170,15 +1193,16 @@ func CalculateActual(jitMats []JitMaterial, confirmJitDateMap map[string][]JitDa
 			productionQty := jitDate.ProductionQty
 			planDate := jitDate.Date
 			planDateStr := planDate.Format("2006-01-02")
+			materialCode := jitMat.MaterialCode
 
-			key := fmt.Sprintf("%s|%s", planDateStr, "R")
+			key := fmt.Sprintf("%s|%s|%s", materialCode, planDateStr, "R")
 			if confirmJit, exist := confirmJitDateMap[key]; exist {
 				for _, item := range confirmJit {
 					confirmQty += item.ConfirmQty
 				}
 			}
 
-			key = fmt.Sprintf("%s|%s", planDateStr, "U")
+			key = fmt.Sprintf("%s|%s|%s", materialCode, planDateStr, "U")
 			if confirmJit, exist := confirmJitDateMap[key]; exist {
 				for _, item := range confirmJit {
 					confirmQty += item.ConfirmUrgentQty

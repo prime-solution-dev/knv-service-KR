@@ -1,6 +1,7 @@
 package routes
 
 import (
+	confirmservice "jnv-jit/internal/services/confirm-service"
 	inventoryService "jnv-jit/internal/services/inventory-service"
 	jitInboundService "jnv-jit/internal/services/jit-inbound-service"
 	"jnv-jit/internal/services/kanbanService"
@@ -48,4 +49,7 @@ func RegisterRoutes(router *gin.Engine) {
 		utils.ProcessRequestMultiPart(c, jitInboundService.UploadPlan)
 	})
 
+	router.POST("/JITInbound/Confirm", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, confirmservice.Confirm)
+	})
 }

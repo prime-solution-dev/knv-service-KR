@@ -98,7 +98,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	}
 
 	uploadPlan := UploadPlanRequest{}
-	uploadPlan.StartCal = getStartCalDate(sqlx)
+	uploadPlan.StartCal = GetStartCalDate(sqlx)
 	uploadPlan.MaterialStocks = matStock
 	uploadPlan.RequestPlan = plans
 	uploadPlan.IsBom = true
@@ -113,7 +113,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	return nil, nil
 }
 
-func getStartCalDate(sqlx *sqlx.DB) time.Time {
+func GetStartCalDate(sqlx *sqlx.DB) time.Time {
 	result, err := db.ExecuteQuery(sqlx, "select start_cal_date_kr() date")
 
 	if err != nil {

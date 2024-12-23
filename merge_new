@@ -1,0 +1,142 @@
+func MergeJitDaily(jitLineMap map[string][]JitLine, jitLineDBMap map[string][]JitLine, isNotInitPlaned bool, startDate time.Time) (map[string][]JitLine, error) {
+	weekMap := map[int]int{}
+	weekCheck := map[int]bool{}
+	jitLineDateCheck := map[string]bool{}
+
+	startDate = startDate.Truncate(24 * time.Hour)
+
+	for jitLineKey, jitLines := range jitLineMap {
+		for jitLineDBKey, jitLineDB := range jitLineDBMap {
+			if jitLineKey == jitLineDBKey {
+				sumConfirmRequireQty := 0.0
+				sumConfirmUrgentQty := 0.0
+				var maxConfirmRequireDate *time.Time
+				var maxConfirmUrgentDate *time.Time
+
+				for _, jitLineDB := range jitLineDB {
+					if jitLineDB.ConfirmRequireDate != nil {
+						if maxConfirmRequireDate == nil || maxConfirmRequireDate.Before(*jitLineDB.ConfirmRequireDate) {
+							maxConfirmRequireDate = jitLineDB.ConfirmRequireDate
+						}
+					}
+
+					if jitLineDB.ConfirmUrgentDate != nil {
+						if maxConfirmUrgentDate == nil || maxConfirmUrgentDate.Before(*jitLineDB.ConfirmUrgentDate) {
+							maxConfirmUrgentDate = jitLineDB.ConfirmUrgentDate
+						}
+					}
+
+					sumConfirmRequireQty += jitLineDB.ConfirmRequireQty
+					sumConfirmUrgentQty += jitLineDB.ConfirmUrgentQty
+				}
+
+				for i, jitLine := range jitLines {
+					if i+1 == len(jitLines) {
+						jitLineMap[jitLineKey][i].ConfirmRequireQty += sumConfirmRequireQty
+						jitLineMap[jitLineKey][i].ConfirmUrgentQty += sumConfirmUrgentQty
+
+						if maxConfirmRequireDate != nil && (jitLine.ConfirmRequireDate == nil || jitLine.ConfirmRequireDate.Before(*maxConfirmRequireDate)) {
+							jitLineMap[jitLineKey][i].ConfirmRequireDate = maxConfirmRequireDate
+						}
+
+						if maxConfirmUrgentDate != nil && (jitLine.ConfirmUrgentDate == nil || jitLine.ConfirmUrgentDate.Before(*maxConfirmUrgentDate)) {
+							jitLineMap[jitLineKey][i].ConfirmUrgentDate = maxConfirmUrgentDate
+						}
+					}
+				}
+			}
+		}
+
+		for _, jitLine := range jitLines {
+			materialCode := ``
+			planDate := jitLine.DailyDate
+			planDateStr := planDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+
+			_, week := jitLine.DailyDate.ISOWeek()
+			weekKey := week
+			if _, exist := weekCheck[weekKey]; !exist {
+				weekMap[weekKey] = week
+				weekCheck[weekKey] = true
+			}
+
+			jitLineDateKey := fmt.Sprintf(`%s|%s`, planDateStr, materialCode)
+			if _, exist := jitLineDateCheck[jitLineDateKey]; !exist {
+				jitLineDateCheck[jitLineDateKey] = true
+			}
+		}
+	}
+
+	jitLineDBTempMap := map[string][]JitLine{}
+	for jitLineDBKey, jitLineDBs := range jitLineDBMap {
+		for _, jitLineDB := range jitLineDBs {
+			dbMaterialCode := jitLineDB.MaterialCode
+			dbPlanDate := jitLineDB.DailyDate
+			dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+			productionQty := 0.0
+			productionPlantQty := 0.0
+			productionSubconQty := 0.0
+			var planId *int64
+
+			jitLineDateKey := fmt.Sprintf(`%s|%s`, dbPlanDateStr, dbMaterialCode)
+			_, jitLineDateExist := jitLineDateCheck[jitLineDateKey]
+
+			if isNotInitPlaned {
+				if !jitLineDateExist && !dbPlanDate.Before(startDate) {
+					_, week := jitLineDB.DailyDate.ISOWeek()
+					weekKey := week
+					_, weekMapExist := weekMap[weekKey]
+
+					if !weekMapExist {
+						productionQty = jitLineDB.ProductionQty
+						productionPlantQty = jitLineDB.ProductionPlantQty
+						productionSubconQty = jitLineDB.ProductionSubconQty
+					}
+				}
+
+			} else if !dbPlanDate.Before(startDate) {
+				productionQty = jitLineDB.ProductionQty
+				productionPlantQty = jitLineDB.ProductionPlantQty
+				productionSubconQty = jitLineDB.ProductionSubconQty
+			}
+
+			if productionQty > 0 {
+				planId = jitLineDB.PlanId
+			}
+
+			newJitLine := JitLine{
+				id:                  0,
+				PlanId:              planId,
+				DailyDate:           jitLineDB.DailyDate,
+				MaterialCode:        jitLineDB.MaterialCode,
+				LineCode:            jitLineDB.LineCode,
+				ProductionQty:       productionQty,
+				ProductionPlantQty:  productionPlantQty,
+				ProductionSubconQty: productionSubconQty,
+				RequireQty:          0,
+				UrgenQty:            0,
+				ConfirmRequireQty:   jitLineDB.ConfirmRequireQty,
+				ConfirmUrgentQty:    jitLineDB.ConfirmUrgentQty,
+				ConfirmRequireDate:  jitLineDB.ConfirmRequireDate,
+				ConfirmUrgentDate:   jitLineDB.ConfirmUrgentDate,
+				LeadTime:            jitLineDB.LeadTime,
+				RefReuqestID:        nil,
+			}
+
+			jitLineDBTempMap[jitLineDBKey] = append(jitLineDBTempMap[jitLineDBKey], newJitLine)
+		}
+	}
+
+	for key, item := range jitLineDBTempMap {
+		jitLineMap[key] = item
+	}
+
+	rowsIdCount := int64(1)
+	for _, jitLines := range jitLineMap {
+		for i := range jitLines {
+			jitLines[i].id = rowsIdCount
+			rowsIdCount++
+		}
+	}
+
+	return jitLineMap, nil
+}
