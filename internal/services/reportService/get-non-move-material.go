@@ -15,9 +15,9 @@ type GetNonMoveMaterialRequest struct {
 
 type GetNonMoveMaterialResponse struct {
 	Sku                 string `json:"sku"`
-	Description         string `json:"description"`
-	CurrentQty          string `json:"currentQty"`
-	LastTransactionDate string `json:"lastTransactionDate"`
+	Description         any    `json:"description"`
+	CurrentQty          any    `json:"currentQty"`
+	LastTransactionDate any    `json:"lastTransactionDate"`
 }
 
 func GetNonMoveMaterial(c *gin.Context, jsonPayload string) (interface{}, error) {
@@ -28,7 +28,7 @@ func GetNonMoveMaterial(c *gin.Context, jsonPayload string) (interface{}, error)
 		return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
 	}
 
-	sqlx, err := db.ConnectSqlx(`jit_portal`)
+	sqlx, err := db.ConnectSqlx(`jit_portal_kr`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,19 +40,16 @@ func GetNonMoveMaterial(c *gin.Context, jsonPayload string) (interface{}, error)
 
 	query := fmt.Sprintf(`
 		select m.material_code sku
-				,m.description 
-				,m.current_qty qty
-			,greatest(
-				coalesce(cast(last_gr as date), date '1900-01-01'), 
-				coalesce(last_gi, date '1900-01-01')
-			) AS last_move_date
-		from materials m
-		where (current_date - greatest(
-				coalesce(cast(last_gr as date), date '1900-01-01'), 
-				coalesce(last_gi, date '1900-01-01')
-			)) > %d
-		and (last_gr is not null OR last_gi is not null)
+                                ,m.description
+                                ,to_char(m.current_qty, 'fm999,999,999') qty
+                        ,coalesce(greatest(last_gr, last_gi
+                        )::varchar, '99') AS last_move_date
+                from materials m
+            where (current_date - greatest(last_gr, last_gi)) > %s
 	`, req.OverDate)
+
+	// fmt.Println(query)
+
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
 		return nil, err
@@ -61,9 +58,9 @@ func GetNonMoveMaterial(c *gin.Context, jsonPayload string) (interface{}, error)
 	for _, item := range rows {
 		addItem := GetNonMoveMaterialResponse{
 			Sku:                 item["sku"].(string),
-			Description:         item["description"].(string),
-			CurrentQty:          item["qty"].(string),
-			LastTransactionDate: item["last_move_date"].(string),
+			Description:         item["description"],
+			CurrentQty:          item["qty"],
+			LastTransactionDate: item["last_move_date"],
 		}
 
 		res = append(res, addItem)

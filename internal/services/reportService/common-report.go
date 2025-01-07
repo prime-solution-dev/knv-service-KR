@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-func GetMondayOfCurrentWeek() string {
+func GetMondayDateOfCurrentWeek() time.Time {
 	now := time.Now()
 
 	offset := int(time.Monday - now.Weekday())
@@ -12,15 +12,17 @@ func GetMondayOfCurrentWeek() string {
 		offset = -6
 	}
 
-	monday := now.AddDate(0, 0, offset)
+	return now.AddDate(0, 0, offset)
+}
 
-	return monday.Format("2006-01-02")
+func GetMondayOfCurrentWeek() string {
+	return GetMondayDateOfCurrentWeek().Format("2006-01-02")
 }
 
 func GetStartRecal() {
 	//Todo function
 
-	// sqlx, err := db.ConnectSqlx(`jit_portal`)
+	// sqlx, err := db.ConnectSqlx(`jit_portal_kr`)
 	// if err != nil {
 	// 	return nil, err
 	// }

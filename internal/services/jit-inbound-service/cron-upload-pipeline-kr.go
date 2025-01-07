@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"jnv-jit/internal/cronjob"
 	"jnv-jit/internal/db"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -108,31 +107,24 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 		plans = append(plans, item)
 	}
 
-	//todo update stock db
-
 	gormx, _ := db.ConnectGORM(`jit_portal`)
 	defer db.CloseGORM(gormx)
 
 	updateFunc := func(gorm *gorm.DB, matUpdateItems []MaterialStock) {
-		sql := "UPDATE materials SET current_qty = CASE "
-		var ids []interface{}
-		var condition []interface{}
+		tx := gorm.Begin()
 
-		for _, mat := range matUpdateItems {
-			sql += " WHEN material_code = ? THEN ? "
-			ids = append(ids, mat.MaterialCode, mat.StockPlantQty+mat.StockSubconQty)
-			condition = append(condition, mat.MaterialCode)
+		for _, matUpdate := range matUpdateItems {
+			tx.Table("materials").Where("material_code = ?", matUpdate.MaterialCode).Updates(map[string]any{
+				"current_qty":  matUpdate.StockPlantQty + matUpdate.StockSubconQty,
+				"updated_date": time.Now().Format(time.DateTime),
+			})
 		}
 
-		sql += " END "
-		// sql += " , updated_by = 0, updated_date = now()"
-		sql += "  WHERE material_code IN (?) "
-
-		ids = append(ids, condition)
-
-		if err := gorm.Exec(sql, ids...).Error; err != nil {
-			log.Println(err)
+		err := tx.Commit().Error
+		if err != nil {
+			tx.Rollback()
 		}
+
 	}
 
 	var matUpdateList []MaterialStock
@@ -141,7 +133,7 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 
 		matUpdateList = append(matUpdateList, matItem)
 
-		if len(matUpdateList) >= 200 || index == len(matStock)-1 {
+		if len(matUpdateList) >= 500 || index == len(matStock)-1 {
 			updateFunc(gormx, matUpdateList)
 			matUpdateList = []MaterialStock{}
 		}
@@ -153,7 +145,7 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 	uploadPlan.RequestPlan = plans
 	uploadPlan.IsBom = false
 	uploadPlan.IsCheckFg = false
-	uploadPlan.IsUrgentByStockDif = true
+	uploadPlan.IsUrgentByStockDif = false
 
 	_, err = CalculateUploadPlan(uploadPlan)
 	if err != nil {
@@ -161,10 +153,6 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 	}
 
 	return nil
-}
-
-func ProcessUpdateStock() {
-
 }
 
 func ReadStock(datas []map[string]interface{}) (map[string]MaterialStock, error) {

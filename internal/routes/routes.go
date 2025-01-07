@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"jnv-jit/internal/middlewares"
 	confirmservice "jnv-jit/internal/services/confirm-service"
 	inventoryService "jnv-jit/internal/services/inventory-service"
 	jitInboundService "jnv-jit/internal/services/jit-inbound-service"
@@ -16,6 +17,7 @@ func init() {
 }
 
 func RegisterRoutes(router *gin.Engine) {
+	router.Use(middlewares.CorsMiddleware())
 
 	router.POST("/JIT/GetDashboardOverall", func(c *gin.Context) {
 		utils.ProcessRequestPayload(c, reportService.GetDashboardOverall)

@@ -1,6 +1,48 @@
 package confirmservice
 
-import "time"
+import (
+	"log"
+	"strconv"
+	"time"
+)
+
+const (
+	customDateFormat          = "2006-01-02"
+	customDateFormatSecondary = "01/02/06"
+	customDateFormatThird     = "1/2/06"
+)
+
+type CustomDate time.Time
+
+type CustomFloat64 float64
+
+func (cf *CustomFloat64) UnmarshalJSON(b []byte) error {
+	str := string(b)
+	str = str[1 : len(str)-1]
+	f, err := strconv.ParseFloat(str, 64)
+	if err != nil {
+		*cf = CustomFloat64(0)
+	}
+	*cf = CustomFloat64(f)
+	return nil
+}
+
+func (cd *CustomDate) UnmarshalJSON(b []byte) error {
+	str := string(b)
+	str = str[1 : len(str)-1]
+	t, err := time.Parse(customDateFormat, str)
+	if err != nil {
+		t, err = time.Parse(customDateFormatSecondary, str)
+		if err != nil {
+			t, err = time.Parse(customDateFormatThird, str)
+			if err != nil {
+				log.Panic(err)
+			}
+		}
+	}
+	*cd = CustomDate(t)
+	return nil
+}
 
 type JitDaily struct {
 	JitDailyID         int64      `gorm:"column:jit_daily_id;primaryKey;autoIncrement"`
@@ -51,30 +93,40 @@ type JitDaily struct {
 	IsNewRequired      *bool      `gorm:"column:is_new_required"`
 }
 
+func (JitDaily) TableName() string {
+	return "jit_daily"
+}
+
+type ConfirmRequestBody struct {
+	Filename string           `json:"filename"`
+	UserId   int              `json:"userId"`
+	Data     []ConfirmRequest `json:"data"`
+}
+
 type ConfirmRequest struct {
-	RowIndex     int        `json:"row_index"`
-	DailyType    string     `json:"Daily Type"`
-	Tech         string     `json:"Tech"`
-	MaterialCode string     `json:"Material"`
-	SupplierCode string     `json:"SupplierCode"`
-	Description  string     `json:"Description"`
-	RequiredQty  float64    `json:"Required QTY"`
-	UrgentQty    float64    `json:"Urgent QTY"`
-	RequiredDate *time.Time `json:"Req. Del Date"`
-	ConfQty      float64    `json:"Conf. Del. QTY"`
-	ConfDate     *time.Time `json:"Conf. Del. Date(MM/DD/YYYY)"`
+	RowIndex     *int           `json:"row_index"`
+	DailyType    *string        `json:"Daily Type"`
+	Tech         *string        `json:"Tech"`
+	MaterialCode *string        `json:"Material"`
+	SupplierCode *string        `json:"SupplierCode"`
+	Description  *string        `json:"Description"`
+	RequiredQty  *CustomFloat64 `json:"Required QTY"`
+	UrgentQty    *CustomFloat64 `json:"Urgent QTY"`
+	RequiredDate *CustomDate    `json:"Req. Del Date"`
+	ConfQty      *CustomFloat64 `json:"Conf. Del. QTY"`
+	ConfDate     *CustomDate    `json:"Conf. Del. Date(MM/DD/YYYY)"`
 }
 
 type ConfirmData struct {
-	MaterialId       int
+	MaterialId       int64
 	MaterialCode     string
 	RequiredDate     time.Time
 	RequireTime      time.Time
-	DailyTime        string
+	DailyTime        time.Time
 	RequiredQty      float64
 	UrgentQty        float64
-	JitDailyID       int
-	LineID           int
+	JitDailyID       int64
+	LineID           int64
 	ConfirmQty       float64
 	ConfirmUrgentQty float64
 	ConfirmDate      *time.Time
@@ -84,4 +136,53 @@ type ConfirmData struct {
 type ConfirmMinMatDate struct {
 	MinDate   time.Time
 	Materials string
+}
+
+type JitBaseConfirmDetail struct {
+	OriginalJitDailyID *int64
+	MaterialID         int64
+	DailyDate          time.Time
+	BeginStock         float64
+	ProductQty         float64
+	ConfQty            float64
+	ConfUrgentQty      float64
+	ConfDate           *time.Time
+	ConfUrgentDate     *time.Time
+	EndOfStock         float64
+	MaterialCode       string
+}
+
+type ConfirmDetailData struct {
+	OriginalJitDailyID int64
+	MaterialID         int64
+	DailyDate          time.Time
+	BeginStock         float64
+	ProductQty         float64
+	ConfQty            float64
+	ConfUrgentQty      float64
+	ConfDate           *time.Time
+	ConfUrgentDate     *time.Time
+}
+
+type UploadLog struct {
+	ID             int    `gorm:"primaryKey"`
+	MasterName     string `gorm:"type:varchar(255);not null"`
+	Type           string `gorm:"type:varchar(255)"`
+	FileName       string `gorm:"type:varchar(255);not null"`
+	UploadRow      int    `gorm:"not null"`
+	Status         bool   `gorm:"default:false"`
+	Percent        int
+	ImportDate     time.Time
+	LastUpdateDate time.Time
+	UploadReason   string `gorm:"type:text"`
+	ActionBy       int
+}
+
+func (UploadLog) TableName() string {
+	return "upload_logs"
+}
+
+type ConfirmResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }

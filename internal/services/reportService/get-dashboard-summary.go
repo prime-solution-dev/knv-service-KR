@@ -17,6 +17,7 @@ type GetDashboardSummaryRequest struct {
 	Suppliers []string `json:"suppliers"`
 	WeekData  int      `json:"week_data"`
 	Materials []string `json:"materials"`
+	UserId    int      `json:"userId"`
 }
 
 type GetDashboardSummaryResponse struct {
@@ -41,6 +42,7 @@ type DailySummaryCal struct {
 	MaterialID       string
 	Sku              string
 	SupplierCode     string
+	SupplierName     string
 	RequestQty       int
 	ConfirmQty       int
 	ConfirmQtyKPI    bool
@@ -60,6 +62,7 @@ type JitDaily struct {
 	MaterialID         string
 	Sku                string
 	SupplierCode       string
+	SupplierName       string
 	RequireQty         int
 	ConfirmRequireQty  int
 	ConfirmRequireDate time.Time
@@ -88,7 +91,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 		return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
 	}
 
-	sqlx, err := db.ConnectSqlx(`jit_portal`)
+	sqlx, err := db.ConnectSqlx(`jit_portal_kr`)
 	if err != nil {
 		return nil, err
 	}
@@ -97,29 +100,45 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 	qCondSupplier := ``
 	qCondMaterial := ``
 	qCondWeekData := ``
+	week := 0
 
-	startDate := GetMondayOfCurrentWeek()
-	firstDate := GetEarliestMonday(time.Now(), req.WeekData)
+	if req.WeekData != 0 {
+		week = req.WeekData
+	}
+
+	// startDate := GetMondayOfCurrentWeek()
+	// firstDate := GetEarliestMonday(time.Now(), week-1).AddDate(0, 0, 7)
 
 	if len(req.Suppliers) > 0 {
 		qCondSupplier = fmt.Sprintf(` and s.supplier_code in ('%s') `, strings.Join(req.Suppliers, `','`))
+		// qCondSupplier = fmt.Sprintf(` and s.supplier_id in ('%s') `, strings.Join(req.Suppliers, `','`))
 	}
 
 	if len(req.Materials) > 0 {
 		qCondMaterial = fmt.Sprintf(` and m.material_code in ('%s')`, strings.Join(req.Materials, `','`))
 	}
 
-	if len(req.Suppliers) != 1 {
-		qCondWeekData = fmt.Sprintf(` and jd.daily_date >= '%s' `, startDate)
-	} else {
-		qCondWeekData = fmt.Sprintf(` and jd.daily_date between '%s' and '%s' `, firstDate.Format("2006-01-02"), time.Now().Format("2006-01-02"))
-	}
+	qCondWeekData = fmt.Sprintf(` and jd.daily_date between (current_date - interval '%d weeks') and '%s' `, week, GetMondayDateOfCurrentWeek().AddDate(0, 0, -1).Format("2006-01-02"))
+
+	qCondUser := fmt.Sprintf(` and case when util_is_admin(%d) then true else 
+        case
+			when (select util_is_supplier(%d)) then
+				mat.supplier_id = (select supplier_id from users where user_id = %d)
+			else
+				case when util_is_planner(%d) then
+					(select planner_code from users where user_id = %d) like '%%' || mat.planner_code || '%%'
+				else
+					false
+				end
+			end
+    	end`, req.UserId, req.UserId, req.UserId, req.UserId, req.UserId)
 
 	queryDaily := fmt.Sprintf(`
 		select jd.daily_date
 			, m.material_id
 			, m.material_code
 			, s.supplier_code 
+			, s.supplier_name
 			, coalesce(jd.required_qty,0) as require_qty
 			, coalesce(jd.conf_qty,0) as confirm_require_qty
 			, coalesce(jd.conf_date, '1900-01-01') as confirm_require_date
@@ -127,6 +146,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 			, coalesce(jd.conf_urgent_qty,0) as confirm_urgent_qty
 			, coalesce(jd.conf_urgent_date, '1900-01-01') as confirm_urgent_date
 		from jit_daily jd
+		left join materials mat on mat.material_id = jd.material_id
 		left join jit_daily jd_prd on jd.original_jit_daily_id = jd_prd.jit_daily_id
 		left join suppliers s on jd.supplier_id = s.supplier_id
 		left join materials m on jd.material_id = m.material_id
@@ -135,9 +155,11 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 		%s
 		%s
 		%s
-	`, qCondWeekData, qCondSupplier, qCondMaterial)
+		%s
+	`, qCondUser, qCondWeekData, qCondSupplier, qCondMaterial)
 	println(queryDaily)
 	rowsDaily, err := db.ExecuteQuery(sqlx, queryDaily)
+
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +167,9 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 	if len(rowsDaily) == 0 {
 		return nil, nil
 	}
+
+	// println("rows from query")
+	// println(len(rowsDaily))
 
 	var jitDailys []JitDaily
 	var matDay []string
@@ -157,6 +182,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 		daily.DailyDate = item["daily_date"].(time.Time).Truncate(24 * time.Hour)
 		daily.Sku = item["material_code"].(string)
 		daily.SupplierCode = item["supplier_code"].(string)
+		daily.SupplierName = item["supplier_name"].(string)
 		daily.RequireQty = int(item["require_qty"].(float64))
 		daily.ConfirmRequireQty = int(item["confirm_require_qty"].(float64))
 		daily.ConfirmRequireDate = item["confirm_require_date"].(time.Time)
@@ -166,7 +192,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 
 		jitDailys = append(jitDailys, daily)
 
-		if daily.RequireQty > 0 {
+		if daily.ConfirmRequireQty > 0 {
 			confirmDateStr := daily.ConfirmRequireDate.Format("2006-01-02")
 
 			matDayKey := fmt.Sprintf(`%s|%s`, confirmDateStr, daily.MaterialID)
@@ -175,7 +201,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 			}
 		}
 
-		if daily.UrgentQty > 0 {
+		if daily.ConfirmUrgentQty > 0 {
 			confirmDateStr := daily.ConfirmUrgentDate.Format("2006-01-02")
 
 			matDayKey := fmt.Sprintf(`%s|%s`, confirmDateStr, daily.MaterialID)
@@ -224,9 +250,26 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 
 	if len(req.Suppliers) == 1 {
 		res = summaryByWeek(dailyCal, req.WeekData)
+		sort.Slice(res, func(i, j int) bool {
+			dateBefore, err := time.Parse("02/01/2006", res[i].LabelText)
+			if err != nil {
+				fmt.Println("Error parsing date:", err)
+			}
+
+			dateAfter, err := time.Parse("02/01/2006", res[j].LabelText)
+			if err != nil {
+				fmt.Println("Error parsing date:", err)
+			}
+
+			return dateBefore.Before(dateAfter)
+
+		})
 	} else {
 		res = summaryBySupplier(dailyCal)
 	}
+
+	// println("rows from dailyCal")
+	// println(len(dailyCal))
 
 	return res, nil
 }
@@ -240,6 +283,7 @@ func CalSummaryKPI(datas []JitDaily, stockDays map[string]StockDay) (map[string]
 		requestDate := dailyItem.DailyDate.Truncate(24 * time.Hour)
 		requestDateStr := dailyItem.DailyDate.Format("2006-01-02")
 		supplierCode := dailyItem.SupplierCode
+		supplierName := dailyItem.SupplierName
 		materialID := dailyItem.MaterialID
 		sku := dailyItem.Sku
 
@@ -276,6 +320,7 @@ func CalSummaryKPI(datas []JitDaily, stockDays map[string]StockDay) (map[string]
 				Date:             requestDate,
 				RequestType:      requestType,
 				SupplierCode:     supplierCode,
+				SupplierName:     supplierName,
 				MaterialID:       materialID,
 				Sku:              sku,
 				RequestQty:       requireQty,
@@ -295,8 +340,10 @@ func CalSummaryKPI(datas []JitDaily, stockDays map[string]StockDay) (map[string]
 			keyRes := fmt.Sprintf(`%s|%s|%s`, requestDateStr, requestType, materialID)
 			res[keyRes] = dailySum
 
-			keyConfirmMap := fmt.Sprintf(`%s|%s`, confirmRequireDateStr, materialID)
-			dailyConfirmMap[keyConfirmMap] = append(dailyConfirmMap[keyConfirmMap], dailySum)
+			if confirmRequireQty > 0 {
+				keyConfirmMap := fmt.Sprintf(`%s|%s`, confirmRequireDateStr, materialID)
+				dailyConfirmMap[keyConfirmMap] = append(dailyConfirmMap[keyConfirmMap], dailySum)
+			}
 		}
 
 		if urgentQty > 0 {
@@ -318,6 +365,7 @@ func CalSummaryKPI(datas []JitDaily, stockDays map[string]StockDay) (map[string]
 				Date:             requestDate,
 				RequestType:      requestType,
 				SupplierCode:     supplierCode,
+				SupplierName:     supplierName,
 				MaterialID:       materialID,
 				Sku:              sku,
 				RequestQty:       urgentQty,
@@ -337,8 +385,10 @@ func CalSummaryKPI(datas []JitDaily, stockDays map[string]StockDay) (map[string]
 			keyRes := fmt.Sprintf(`%s|%s|%s`, requestDateStr, requestType, materialID)
 			res[keyRes] = dailySum
 
-			keyConfirmMap := fmt.Sprintf(`%s|%s`, confirmUrgentDateStr, materialID)
-			dailyConfirmMap[keyConfirmMap] = append(dailyConfirmMap[keyConfirmMap], dailySum)
+			if confirmUrgentQty > 0 {
+				keyConfirmMap := fmt.Sprintf(`%s|%s`, confirmUrgentDateStr, materialID)
+				dailyConfirmMap[keyConfirmMap] = append(dailyConfirmMap[keyConfirmMap], dailySum)
+			}
 		}
 	}
 
@@ -399,6 +449,7 @@ func CalSummaryKPI(datas []JitDaily, stockDays map[string]StockDay) (map[string]
 
 					remainMaterialStock -= sumItemConfirmQty
 				} else if remainMaterialStock < sumItemConfirmQty {
+					updateAllowcate.ActualQtyKPI = false
 					updateAllowcate.ActualConfirmQty = remainMaterialStock
 
 					remainMaterialStock = 0
@@ -484,7 +535,7 @@ func summaryBySupplier(datas map[string]DailySummaryCal) []GetDashboardSummaryRe
 			}
 
 			sumItem := GetDashboardSummaryResponse{
-				LabelText:             key,
+				LabelText:             item.SupplierName,
 				TotalRequest:          totalRequest,
 				TotalPassKpi:          totalPassKpi,
 				TotalFailKpi:          totalFailKpi,
@@ -530,7 +581,7 @@ func summaryBySupplier(datas map[string]DailySummaryCal) []GetDashboardSummaryRe
 func summaryByWeek(datas map[string]DailySummaryCal, WeekData int) []GetDashboardSummaryResponse {
 	var res []GetDashboardSummaryResponse
 	resMap := make(map[string]GetDashboardSummaryResponse)
-	weeks := GenerateBackWeeks(time.Now(), WeekData)
+	weeks := GenerateBackWeeks(GetMondayDateOfCurrentWeek().AddDate(0, 0, -1), WeekData-1)
 
 	for _, item := range weeks {
 		key := strconv.Itoa(item.WeekNumber)

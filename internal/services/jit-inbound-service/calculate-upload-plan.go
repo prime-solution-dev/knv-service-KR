@@ -1463,11 +1463,19 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 	}
 
 	if err := tx.Model(&JitDaily{}).
-		Where("daily_date >= ? AND material_id IN ?", startDate, mats).
+		Where("daily_date >= ?", startDate).
 		Updates(map[string]interface{}{"is_deleted": true}).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to update is_deleted status: %w", err)
+
 	}
+
+	// if err := tx.Model(&JitDaily{}).
+	// 	Where("daily_date >= ? AND material_id IN ?", startDate, mats).
+	// 	Updates(map[string]interface{}{"is_deleted": true}).Error; err != nil {
+	// 	tx.Rollback()
+	// 	return fmt.Errorf("failed to update is_deleted status: %w", err)
+	// }
 
 	if err := tx.CreateInBatches(&jitDailys, 1000).Error; err != nil {
 		tx.Rollback()
