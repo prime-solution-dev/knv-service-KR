@@ -27,7 +27,6 @@ func init() {
 	cronjob.RegisterJob("upload-pipeline-kr-sun", UploadPlanPipelineKrCron, `0 20 * * 0`)
 	cronjob.RegisterJob("upload-pipeline-kr-tue", UploadPlanPipelineKrCron, `0 6 * * 2`)
 	cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `0 6 * * 4`)
-
 }
 
 func UploadPlanPipelineKrCron() {

@@ -258,7 +258,7 @@ func getMetaData(sqlx *sqlx.DB, req []ConfirmRequest) (ConfirmDataList, error) {
 		left join jit_daily original_main on original_main.jit_daily_id = main.original_jit_daily_id
         where
             main.is_deleted = false and
-            (main.required_qty > 0 or main.urgent_qty > 0) and
+            ((main.required_qty > 0 or main.urgent_qty > 0) or (main.conf_qty > 0 and main.required_qty = 0) or (main.conf_urgent_qty > 0 and main.urgent_qty = 0)) and
             (mat.material_code, main.daily_date) in (%s)
     `, strings.Join(matDate, ","))
 
@@ -311,6 +311,10 @@ func allocateConfirm(req []ConfirmRequest, confirmDataMap ConfirmDataList) (Conf
 
 		sort.Slice(confirmData, func(a, b int) bool {
 			if confirmData[a].RequiredDate.Equal(confirmData[b].RequireTime) {
+				if confirmData[a].LineID == confirmData[b].LineID {
+					return confirmData[a].RequiredQty < confirmData[b].RequiredQty
+				}
+
 				return confirmData[a].LineID < confirmData[b].LineID
 			}
 
@@ -332,9 +336,6 @@ func allocateConfirm(req []ConfirmRequest, confirmDataMap ConfirmDataList) (Conf
 			}
 
 			confirmDate := (*time.Time)(reqData.ConfDate)
-			// _confirmDateValue := *reqData.ConfDate
-
-			// println(_confirmDateValue)
 
 			if isUrgentType {
 				newConfirmDataMap[key][index].ConfirmUrgentQty = *confirmValue
@@ -356,64 +357,47 @@ func allocateConfirm(req []ConfirmRequest, confirmDataMap ConfirmDataList) (Conf
 	return newConfirmDataMap, nil
 }
 
-func clearData(sqlx *sqlx.DB, req []ConfirmRequest) error {
-	qSql := ""
-
-	for index, ReqData := range req {
-		if index != 0 {
-			qSql += " or "
-		}
-
-		qSql += fmt.Sprintf("(mat.material_code = %s and main.daily_date >= %s)", *ReqData.MaterialCode, time.Time(*ReqData.RequiredDate).Format("2006-01-02"))
-	}
-
-	sql := fmt.Sprintf(`
-		update jit_daily main
-			set conf_qty = 0,
-			conf_urgent_qty = 0,
-			conf_date = null,
-			conf_urgent_date = null
-		from materials mat
-		where mat.material_id = main.material_id and
-			(%s)
-	`, qSql)
-
-	_, err := db.ExecuteQuery(sqlx, sql)
-
-	return err
-}
-
 func updateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinMatDate, error) {
 	result := []ConfirmMinMatDate{}
 	resultAddList := make(map[string]bool)
+	clearMatList := make(map[string]bool)
 
 	for _, confirmData := range confirmDataMap {
 		for _, confirmItem := range confirmData {
-			updateData := map[string]interface{}{
-				"updated_by":   0,
-				"updated_date": time.Now(),
+			key := fmt.Sprintf("%d|%s", confirmItem.MaterialId, confirmItem.RequiredDate.Format("2006-01-02"))
+			if exists := clearMatList[key]; !exists {
+				clearPayload := map[string]any{
+					"conf_qty":         0,
+					"conf_date":        nil,
+					"conf_urgent_qty":  0,
+					"conf_urgent_date": nil,
+				}
+
+				err := gorm.Model(&JitDaily{}).Where("material_id = ? and daily_date = ?", confirmItem.MaterialId, confirmItem.RequiredDate.Format("2006-01-02")).Updates(clearPayload).Error
+				if err != nil {
+					return nil, err
+				}
+
+				clearMatList[key] = true
 			}
 
-			if confirmItem.ConfirmDate == nil || confirmItem.ConfirmQty == 0 {
-				updateData["conf_qty"] = 0
-				updateData["conf_date"] = nil
-			} else if confirmItem.ConfirmDate == nil && confirmItem.UrgentDate != nil {
-				updateData["conf_qty"] = confirmItem.ConfirmQty
+			updateData := map[string]any{
+				"updated_by":       0,
+				"updated_date":     time.Now(),
+				"conf_qty":         0,
+				"conf_date":        nil,
+				"conf_urgent_qty":  0,
+				"conf_urgent_date": nil,
+			}
 
-			} else {
+			if confirmItem.ConfirmQty != 0 && confirmItem.ConfirmDate != nil {
 				updateData["conf_qty"] = confirmItem.ConfirmQty
 				updateData["conf_date"] = confirmItem.ConfirmDate
 			}
 
-			if confirmItem.UrgentDate == nil || confirmItem.ConfirmUrgentQty == 0 {
-				updateData["conf_urgent_date"] = nil
-				updateData["conf_urgent_qty"] = 0
-			} else if confirmItem.UrgentDate == nil {
-				updateData["conf_urgent_qty"] = confirmItem.ConfirmUrgentQty
-
-			} else {
-				updateData["conf_urgent_date"] = confirmItem.UrgentDate
-				updateData["conf_urgent_qty"] = confirmItem.ConfirmUrgentQty
+			if confirmItem.ConfirmUrgentQty != 0 && confirmItem.ConfirmDate != nil {
+				updateData["conf_urgent_qty"] = confirmItem.ConfirmQty
+				updateData["conf_urgent_date"] = confirmItem.ConfirmDate
 			}
 
 			err := gorm.Model(&JitDaily{}).Where("jit_daily_id = ?", confirmItem.JitDailyID).Updates(updateData).Error
@@ -446,7 +430,7 @@ func updateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinM
 
 func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate time.Time, confirmData map[string]ConfirmDetailData) error {
 	var jitDailyConfirmDetail []JitBaseConfirmDetail
-	jitDailyConfirmDetailMap := make(map[string]JitBaseConfirmDetail)
+	// jitDailyConfirmDetailMap := make(map[string]JitBaseConfirmDetail)
 	endOfStockMap := make(map[string]float64)
 
 	qSql := ""
@@ -476,7 +460,7 @@ func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate
                         main.is_deleted = false and
 						(%s)
                     group by main.material_id, main.daily_date
-                    order by main.material_id, main.daily_date`, qSql) //todo: use sort slice
+                    order by main.material_id, main.daily_date`, qSql)
 
 	items, err := db.ExecuteQuery(sqlx, sql)
 	println(sql)
@@ -517,7 +501,7 @@ func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate
 
 		key := fmt.Sprintf("%s|%s", materialCode, date)
 
-		jitDailyConfirmDetailMap[key] = detailData
+		// jitDailyConfirmDetailMap[key] = detailData
 		jitDailyConfirmDetail = append(jitDailyConfirmDetail, detailData)
 		endOfStockMap[key] = confirmDetail["end_of_stock"].(float64)
 	}
@@ -529,8 +513,8 @@ func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate
 		return jitDailyConfirmDetail[i].MaterialID < jitDailyConfirmDetail[j].MaterialID
 	})
 
-	for index, jitDaily := range jitDailyConfirmDetail {
-		if (len(jitDailyConfirmDetail) > 0 && index == 0) || jitDaily.DailyDate.Before(startDate) {
+	for _, jitDaily := range jitDailyConfirmDetail {
+		if jitDaily.DailyDate.Before(startDate) {
 			continue
 		}
 

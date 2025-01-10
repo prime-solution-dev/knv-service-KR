@@ -1,7 +1,6 @@
 package confirmservice
 
 import (
-	"log"
 	"strconv"
 	"time"
 )
@@ -36,7 +35,7 @@ func (cd *CustomDate) UnmarshalJSON(b []byte) error {
 		if err != nil {
 			t, err = time.Parse(customDateFormatThird, str)
 			if err != nil {
-				log.Panic(err)
+				cd = nil
 			}
 		}
 	}

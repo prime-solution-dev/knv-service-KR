@@ -77,7 +77,10 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	defer sqlx.Close()
 
 	startDate := req.StartCal
+	startDateStr := startDate.Format("2006-01-02")
+	println((startDateStr))
 	endDate := time.Now().Truncate(24 * time.Hour)
+
 	isBom := req.IsBom
 	isCheckFg := req.IsCheckFg
 	matLineMap := map[string]map[string]MaterialLine{}
@@ -1259,7 +1262,7 @@ func GetMatrialMap(sqlx *sqlx.DB, condition []string) (map[string]Material, erro
 		,  coalesce(s.supplier_code , '') as supplier_code
 		from materials m
 		left join suppliers s on m.supplier_id  = s.supplier_id 
-		where m.material_code in ('%s')
+		where m.is_deleted = false and m.material_code in ('%s')
 	`, strings.Join(condition, `','`))
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
@@ -1469,13 +1472,6 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		return fmt.Errorf("failed to update is_deleted status: %w", err)
 
 	}
-
-	// if err := tx.Model(&JitDaily{}).
-	// 	Where("daily_date >= ? AND material_id IN ?", startDate, mats).
-	// 	Updates(map[string]interface{}{"is_deleted": true}).Error; err != nil {
-	// 	tx.Rollback()
-	// 	return fmt.Errorf("failed to update is_deleted status: %w", err)
-	// }
 
 	if err := tx.CreateInBatches(&jitDailys, 1000).Error; err != nil {
 		tx.Rollback()
