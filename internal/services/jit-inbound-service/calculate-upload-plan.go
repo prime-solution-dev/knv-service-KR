@@ -423,17 +423,19 @@ func BuildJitDaily(startDate time.Time, endDate time.Time, matLineMap map[string
 									RefReuqestID:        nil,
 								}
 
-								if jitLine.ProductionQty == 0 || bom.Qty == 0 {
-									return nil, nil, fmt.Errorf(`productionQty or bom.qty = 0`)
+								// if jitLine.ProductionQty == 0 || bom.Qty == 0 {
+								// 	return nil, nil, fmt.Errorf(`productionQty or bom.qty = 0`)
+								// }
+
+								if !(jitLine.ProductionQty == 0 || bom.Qty == 0) {
+									ProductionQty := (jitLine.ProductionQty / bom.Qty)
+									if waste != 0 {
+										ProductionQty *= (1 + waste/100)
+									}
+
+									jitLine.ProductionQty = ProductionQty
 								}
 
-								//waste
-								ProductionQty := (jitLine.ProductionQty / bom.Qty)
-								if waste != 0 {
-									ProductionQty *= (1 + waste/100)
-								}
-
-								jitLine.ProductionQty = ProductionQty
 								jitLineMap[jitLineBomKey] = append(jitLineMap[jitLineBomKey], jitLine)
 							}
 						} else {
