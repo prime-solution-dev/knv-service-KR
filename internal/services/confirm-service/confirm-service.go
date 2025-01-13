@@ -371,6 +371,7 @@ func updateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinM
 					"conf_date":        nil,
 					"conf_urgent_qty":  0,
 					"conf_urgent_date": nil,
+					"conf_upload_date": time.Now().Format(time.DateTime),
 				}
 
 				err := gorm.Model(&JitDaily{}).Where("material_id = ? and daily_date = ?", confirmItem.MaterialId, confirmItem.RequiredDate.Format("2006-01-02")).Updates(clearPayload).Error
