@@ -16,14 +16,53 @@ import (
 
 type ConfirmDataList map[string][]ConfirmData
 
-func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
-	var reqBody ConfirmRequestBody
-
-	if err := json.Unmarshal([]byte(jsonPayload), &reqBody); err != nil {
-		return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
+func validateDateFormat(value string) bool {
+	formatChecks := []string{
+		customDateFormat,
+		customDateFormatSecondary,
+		customDateFormatThird,
+		customDateFormatFour,
+		customDateFormatFive,
+		customDateFormatSix,
+		customDateFormatSeven,
 	}
 
-	req := reqBody.Data
+	for _, layout := range formatChecks {
+		if _, err := time.Parse(layout, value); err == nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+func validateRequest(req map[string]any) (bool, int, string) {
+	for index, item := range req["data"].([]any) {
+		println(item)
+		reqData := item.(map[string]any)
+
+		confQty, okQty := reqData["Conf. Del. QTY"].(string)
+		confDate, okDate := reqData["Conf. Del. Date(MM/DD/YYYY)"].(string)
+
+		if okQty && confQty != "" && confQty != "0" {
+			if !okDate || confDate == "" || !validateDateFormat(confDate) {
+				return false, index, fmt.Sprintf("confirm date is invalid or empty on row : %d", index+1)
+			}
+		}
+
+	}
+	return true, 0, ""
+}
+
+func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
+	var reqBody ConfirmRequestBody
+	var reqRaw map[string]any
+	var errRow = 0
+	var err error
+
+	if err := json.Unmarshal([]byte(jsonPayload), &reqRaw); err != nil {
+		return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
+	}
 
 	sqlx, err := db.ConnectSqlx(`jit_portal`)
 	if err != nil {
@@ -31,66 +70,79 @@ func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
 	}
 	defer sqlx.Close()
 
-	gorm, err := db.ConnectGORM(`jit_portal`)
-	if err != nil {
-		return nil, err
-	}
-	defer db.CloseGORM(gorm)
+	validate, row, errMsg := validateRequest(reqRaw)
+	errRow = row
 
-	startDate := getStartDate(sqlx)
+	if validate {
+		if err := json.Unmarshal([]byte(jsonPayload), &reqBody); err != nil {
+			return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
+		}
 
-	confirmData, err := getMetaData(sqlx, req)
-	if err != nil {
-		return nil, err
-	}
+		req := reqBody.Data
 
-	confirmData, err = allocateConfirm(req, confirmData)
-	if err != nil {
-		return nil, err
-	}
+		gorm, err := db.ConnectGORM(`jit_portal`)
+		if err != nil {
+			return nil, err
+		}
+		defer db.CloseGORM(gorm)
 
-	tx := gorm.Begin()
+		startDate := getStartDate(sqlx)
 
-	ConfirmMinMatDate, err := updateConfirm(tx, confirmData)
-	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
+		confirmData, err := getMetaData(sqlx, req)
+		if err != nil {
+			return nil, err
+		}
 
-	if err := tx.Commit().Error; err != nil {
-		tx.Rollback()
-	}
+		confirmData, err = allocateConfirm(req, confirmData)
+		if err != nil {
+			return nil, err
+		}
 
-	tx = gorm.Begin()
+		tx := gorm.Begin()
 
-	materialUpdates := []string{}
-	for _, mat := range ConfirmMinMatDate {
-		materialUpdates = append(materialUpdates, fmt.Sprintf("'%s'", mat.Materials))
-	}
+		ConfirmMinMatDate, err := updateConfirm(tx, confirmData)
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
 
-	confirmDetailData, err := getConfirmData(sqlx, startDate, materialUpdates)
-	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
+		if err := tx.Commit().Error; err != nil {
+			tx.Rollback()
+		}
 
-	err = recalActual(tx, sqlx, ConfirmMinMatDate, startDate, confirmDetailData)
-	if err != nil {
-		tx.Rollback()
-		return nil, err
-	}
+		tx = gorm.Begin()
 
-	if err := tx.Commit().Error; err != nil {
-		tx.Rollback()
+		materialUpdates := []string{}
+		for _, mat := range ConfirmMinMatDate {
+			materialUpdates = append(materialUpdates, fmt.Sprintf("'%s'", mat.Materials))
+		}
+
+		confirmDetailData, err := getConfirmData(sqlx, startDate, materialUpdates)
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+
+		err = recalActual(tx, sqlx, ConfirmMinMatDate, startDate, confirmDetailData)
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			tx.Rollback()
+		}
 	}
 
 	filename := reqBody.Filename
-	uploadRow := 0
-	uploadStatus := err == nil
+	uploadRow := errRow
+	uploadStatus := err == nil && validate
 
 	uploadReason := "Success"
 	if err != nil {
 		uploadReason = err.Error()
+	} else if errMsg != "" {
+		uploadReason = errMsg
 	}
 
 	// userIDValue := reqBody.UserId

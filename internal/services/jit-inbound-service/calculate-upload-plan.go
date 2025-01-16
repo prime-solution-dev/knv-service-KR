@@ -1260,7 +1260,7 @@ func GetMatrialMap(sqlx *sqlx.DB, condition []string) (map[string]Material, erro
 	rsMap := map[string]Material{}
 
 	query := fmt.Sprintf(`
-		select m.material_id ,m.material_code , m.supplier_id, m.pallet_pattern
+		select m.material_id ,m.material_code , m.supplier_id, coalesce(m.pallet_pattern, 0) pallet_pattern
 		,  coalesce(s.supplier_code , '') as supplier_code
 		from materials m
 		left join suppliers s on m.supplier_id  = s.supplier_id 
