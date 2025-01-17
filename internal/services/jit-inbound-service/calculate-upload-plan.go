@@ -17,6 +17,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// todo add struct
+type rangeMaterialCal struct {
+	MaterialCode  string
+	StartPlanDate time.Time
+	EndPlanDate   time.Time
+}
+
 type UploadPlanRequest struct {
 	StartCal           time.Time       `json:"start_cal"`
 	IsBom              bool            `json:"is_bom"`
@@ -89,6 +96,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	matCheck := map[string]bool{}
 	reqMap := map[string][]RequestPlan{}
 	fgList := []string{}
+	rageMatCalMap := map[string]rangeMaterialCal{} //todo add
 
 	for i, item := range reqPlan {
 		materialCode := item.MaterialCode
@@ -128,6 +136,29 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 
 			matCheck[matKey] = true
 		}
+
+		rangeKey := materialCode
+		rageMatCal, exist := rageMatCalMap[rangeKey]
+		if !exist {
+			newRageMatCal := rangeMaterialCal{
+				MaterialCode:  materialCode,
+				StartPlanDate: planDate,
+				EndPlanDate:   planDate,
+			}
+
+			rageMatCalMap[rangeKey] = newRageMatCal
+			rageMatCal = newRageMatCal
+		}
+
+		if rageMatCal.StartPlanDate.After(planDate) {
+			rageMatCal.StartPlanDate = planDate
+		}
+
+		if rageMatCal.EndPlanDate.Before(planDate) {
+			rageMatCal.EndPlanDate = planDate
+		}
+		rageMatCalMap[rangeKey] = rageMatCal
+
 	}
 
 	matBompMap, err := GetBom(sqlx, mats, isBom)
@@ -136,6 +167,8 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	}
 
 	if isBom {
+		// rageMatCalMap = GetRangeMatCal(matBompMap, reqPlan)
+
 		if err := ValidationBom(reqMap, matBompMap); err != nil {
 			return nil, fmt.Errorf("failed to validation bom: %w", err)
 		}
@@ -147,10 +180,21 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		}
 	}
 
-	jitDailyPlan, jitDailyMap, err := BuildJitDaily(startDate, endDate, matLineMap, reqMap, matBompMap)
-	if err != nil {
-		return nil, fmt.Errorf("error building JIT daily map: %w", err)
+	//todo adatedd&up
+	var jitDailyPlan []JitDilyPlan
+	var jitDailyMap map[string][]JitLine
+	if req.IsNotInitPlaned {
+		jitDailyPlan, jitDailyMap, err = BuildJitDailyByMaterial(rageMatCalMap, matLineMap, reqMap, matBompMap)
+		if err != nil {
+			return nil, fmt.Errorf("error building JIT daily map: %w", err)
+		}
+	} else {
+		jitDailyPlan, jitDailyMap, err = BuildJitDaily(startDate, endDate, matLineMap, reqMap, matBompMap)
+		if err != nil {
+			return nil, fmt.Errorf("error building JIT daily map: %w", err)
+		}
 	}
+	//
 
 	if len(jitDailyPlan) == 0 || len(jitDailyMap) == 0 {
 		return nil, fmt.Errorf("jitPlan or jitLine not found (%w)", err)
@@ -253,6 +297,47 @@ func GetStartDate(sqlx *sqlx.DB) time.Time {
 	return result[0]["date"].(time.Time)
 }
 
+func GetRangeMatCal(bomMats map[string]Material, reqPlan []RequestPlan) map[string]rangeMaterialCal {
+	rageMatCalMap := map[string]rangeMaterialCal{}
+
+	for _, reqData := range reqPlan {
+
+		bom, existsBom := bomMats[reqData.MaterialCode]
+
+		if existsBom {
+			for _, bomData := range bom.Boms {
+				materialCode := bomData.MaterialCode
+				planDate := reqData.PlanDate.Truncate(24 * time.Hour)
+
+				rangeKey := materialCode
+				rageMatCal, exist := rageMatCalMap[rangeKey]
+				if !exist {
+					newRageMatCal := rangeMaterialCal{
+						MaterialCode:  materialCode,
+						StartPlanDate: planDate,
+						EndPlanDate:   planDate,
+					}
+
+					rageMatCalMap[rangeKey] = newRageMatCal
+					rageMatCal = newRageMatCal
+				}
+
+				if rageMatCal.StartPlanDate.After(planDate) {
+					rageMatCal.StartPlanDate = planDate
+				}
+
+				if rageMatCal.EndPlanDate.Before(planDate) {
+					rageMatCal.EndPlanDate = planDate
+				}
+
+				rageMatCalMap[rangeKey] = rageMatCal
+			}
+		}
+	}
+
+	return rageMatCalMap
+}
+
 func GetBom(sqlx *sqlx.DB, mats []Material, isBom bool) (map[string]Material, error) {
 	matMap := map[string]Material{}
 
@@ -277,12 +362,12 @@ func GetBom(sqlx *sqlx.DB, mats []Material, isBom bool) (map[string]Material, er
 		select m.material_id as material_id, m.material_code as material_code
 			, m.supplier_id as supplier_id, coalesce(m.delivery_lead_time,0) as material_lead_time
 			, coalesce(s.supplier_code, '') as supplier_code
-			, coalesce(jm.fb_material_id, 0) as bom_id, coalesce(jm.fg_per_fb,0) as bom_qty, coalesce(jm.waste,0) as bom_waste 
+			, coalesce(jm.fb_material_id, 0) as bom_id, coalesce(jm.fg_per_fb,0) as bom_qty, coalesce(jm.waste,0) as bom_waste
 			, coalesce(mb.material_code, '') as bom_code,  coalesce(mb.delivery_lead_time,0) as bom_lead_time
-		from materials m 
-		left join jit_master jm on m.material_id  = jm.fg_material_id 
-		left join suppliers s on m.supplier_id = s.supplier_id 
-		left join materials mb on mb.material_id = jm.fb_material_id 
+		from materials m
+		left join jit_master jm on m.material_id  = jm.fg_material_id
+		left join suppliers s on m.supplier_id = s.supplier_id
+		left join materials mb on mb.material_id = jm.fb_material_id
 		where 1=1
 		and m.material_code in ('%s')
 	`, strings.Join(matStr, `','`))
@@ -362,6 +447,169 @@ func ValidationFg(planMap map[string][]RequestPlan, matBompMap map[string]Materi
 	}
 
 	return nil
+}
+
+// todo add
+func BuildJitDailyByMaterial(rageMatCalMap map[string]rangeMaterialCal, matLineMap map[string]map[string]MaterialLine, datas map[string][]RequestPlan, matBomMap map[string]Material) ([]JitDilyPlan, map[string][]JitLine, error) {
+	jitLineMap := map[string][]JitLine{}
+	JitDilyPlans := []JitDilyPlan{}
+	planIdCount := int64(1)
+
+	for matKey, mat := range matLineMap {
+		materialCode := matKey
+		rageMatCal, rageMatCalExist := rageMatCalMap[materialCode]
+
+		if !rageMatCalExist {
+			return nil, nil, fmt.Errorf(`not found rageMatCal of material code : %s`, materialCode)
+		}
+
+		startPlanDate := rageMatCal.StartPlanDate
+		endPlanDate := rageMatCal.EndPlanDate
+
+		for currentDate := startPlanDate; !currentDate.After(endPlanDate); currentDate = currentDate.Add(24 * time.Hour) {
+			for _, matLine := range mat {
+				planDateStr := currentDate.Format("2006-01-02")
+
+				materialCode := matLine.MaterialCode
+				lineCode := matLine.LineCode
+				jitLineKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, materialCode, lineCode)
+
+				matBomKey := materialCode
+				matBom, matBomExist := matBomMap[matBomKey]
+				if !matBomExist {
+					continue
+				}
+
+				dataItems, dataItemExists := datas[jitLineKey]
+				if dataItemExists {
+					for _, dataItem := range dataItems {
+						planId := planIdCount
+						materialCode := dataItem.MaterialCode
+						lineCode := dataItem.LineCode
+						requestQty := dataItem.RequestQty
+						requestPlanQty := dataItem.RequestPlantQty
+						requestSubconQty := dataItem.RequestSubconQty
+						planDate := dataItem.PlanDate
+						endPlandate := dataItem.EndPlanDate
+
+						JitDilyPlans = append(JitDilyPlans, JitDilyPlan{
+							PlanId:           planId,
+							MaterialCode:     materialCode,
+							LineCode:         lineCode,
+							RequestQty:       requestQty,
+							RequestPlantQty:  requestPlanQty,
+							RequestSubconQty: requestSubconQty,
+							PlanDate:         planDate,
+							EndPlanDate:      endPlandate,
+						})
+
+						if len(matBom.Boms) > 0 {
+							for _, bom := range matBom.Boms {
+								bomMaterialCode := bom.MaterialCode
+								waste := bom.Waste
+								bomLeadTime := bom.LeadTime
+
+								jitLineBomKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, bomMaterialCode, lineCode)
+
+								jitLine := JitLine{
+									id:                  0,
+									PlanId:              &planId,
+									DailyDate:           currentDate,
+									MaterialCode:        bomMaterialCode,
+									LineCode:            lineCode,
+									ProductionQty:       requestQty,
+									ProductionPlantQty:  requestPlanQty,
+									ProductionSubconQty: requestSubconQty,
+									RequireQty:          0,
+									UrgenQty:            0,
+									LeadTime:            bomLeadTime,
+									RefReuqestID:        nil,
+								}
+
+								if jitLine.ProductionQty == 0 || bom.Qty == 0 {
+									return nil, nil, fmt.Errorf(`productionQty or bom.qty = 0`)
+								}
+
+								//waste
+								ProductionQty := (jitLine.ProductionQty / bom.Qty)
+								if waste != 0 {
+									ProductionQty *= (1 + waste/100)
+								}
+
+								jitLine.ProductionQty = ProductionQty
+								jitLineMap[jitLineBomKey] = append(jitLineMap[jitLineBomKey], jitLine)
+							}
+						} else {
+							materialLeadTime := matBom.LeadTime
+
+							jitLine := JitLine{
+								id:                  0,
+								PlanId:              &planId,
+								DailyDate:           currentDate,
+								MaterialCode:        materialCode,
+								LineCode:            lineCode,
+								ProductionQty:       requestQty,
+								ProductionPlantQty:  requestPlanQty,
+								ProductionSubconQty: requestSubconQty,
+								RequireQty:          0,
+								UrgenQty:            0,
+								LeadTime:            materialLeadTime,
+								RefReuqestID:        nil,
+							}
+
+							jitLineMap[jitLineKey] = append(jitLineMap[jitLineKey], jitLine)
+						}
+
+						planIdCount++
+					}
+				} else {
+					if len(matBom.Boms) > 0 {
+						for _, bom := range matBom.Boms {
+							bomMaterialCode := bom.MaterialCode
+							jitLineBomKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, bomMaterialCode, lineCode)
+
+							jitLine := JitLine{
+								id:                  0,
+								DailyDate:           currentDate,
+								MaterialCode:        bomMaterialCode,
+								LineCode:            lineCode,
+								ProductionQty:       0,
+								ProductionPlantQty:  0,
+								ProductionSubconQty: 0,
+								RequireQty:          0,
+								UrgenQty:            0,
+								LeadTime:            bom.LeadTime,
+								RefReuqestID:        nil,
+							}
+
+							jitLineMap[jitLineBomKey] = append(jitLineMap[jitLineBomKey], jitLine)
+						}
+					} else {
+						materialLeadTime := matBom.LeadTime
+
+						jitLine := JitLine{
+							id:                  0,
+							DailyDate:           currentDate,
+							MaterialCode:        materialCode,
+							LineCode:            lineCode,
+							ProductionQty:       0,
+							ProductionPlantQty:  0,
+							ProductionSubconQty: 0,
+							RequireQty:          0,
+							UrgenQty:            0,
+							LeadTime:            materialLeadTime,
+							RefReuqestID:        nil,
+						}
+
+						jitLineMap[jitLineKey] = append(jitLineMap[jitLineKey], jitLine)
+					}
+				}
+			}
+		}
+
+	}
+
+	return JitDilyPlans, jitLineMap, nil
 }
 
 func BuildJitDaily(startDate time.Time, endDate time.Time, matLineMap map[string]map[string]MaterialLine, datas map[string][]RequestPlan, matBomMap map[string]Material) ([]JitDilyPlan, map[string][]JitLine, error) {
@@ -538,18 +786,17 @@ func GetJitDailyDB(sqlx *sqlx.DB, startDate time.Time, matStrs []string) (map[st
 			, jd.conf_date as confirm_require_date
 			, jd.conf_urgent_date as confirm_urgent_date
 			, m.material_code
-			, coalesce(jlh.line_header_name,'') as line_code  
+			, coalesce(jlh.line_header_name,'') as line_code
 			, coalesce(m.delivery_lead_time,0) as delivery_lead_time
 		from jit_daily jd
-		left join materials m on jd.material_id = m.material_id 
-		left join jit_line_details jld on jld.line_detail_id  = jd.line_id 
-		left join jit_line_headers jlh on jld.line_header_id = jlh.line_header_id 
+		left join materials m on jd.material_id = m.material_id
+		left join jit_line_headers jlh on jlh.line_header_id = jd.line_id
 		where 1=1
 		and jd.is_deleted = false
 		and (jd.daily_date >= '%s' or jd.conf_date >= '%s' or jd.conf_urgent_date >= '%s')
 		and m.material_code in ('%s')
 	`, startCalDate, startCalDate, startCalDate, strings.Join(matStrs, `','`))
-	//println(query)
+	println(query)
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
 		return nil, err
@@ -626,7 +873,7 @@ func GetJitDailyDB(sqlx *sqlx.DB, startDate time.Time, matStrs []string) (map[st
 }
 
 func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLineDBMap map[string][]JitLine, isNotInitPlaned bool) (map[string][]JitLine, error) {
-	ignoreWeeks := map[int]bool{}
+	ignoreWeeks := map[string]map[int]bool{}
 	jitMatDate := map[string]bool{}
 
 	for jitLineKey, jitLines := range jitLineMap {
@@ -676,11 +923,19 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 			planDate := jitLine.DailyDate
 			planDateStr := planDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
 
+			matKey := materialCode
 			_, week := planDate.ISOWeek()
 			weekKey := week
-			if _, exist := ignoreWeeks[weekKey]; !exist {
-				ignoreWeeks[weekKey] = true
+			if _, exists := ignoreWeeks[matKey]; !exists {
+				ignoreWeeks[matKey] = make(map[int]bool)
+				ignoreWeeks[matKey][weekKey] = true
+			} else {
+				ignoreWeeks[matKey][weekKey] = true
 			}
+
+			// if _, exist := ignoreWeeks[weekKey]; !exist {
+			// 	ignoreWeeks[weekKey] = true
+			// }
 
 			jitMatDateKey := fmt.Sprintf(`%s|%s`, materialCode, planDateStr)
 			if _, exist := jitMatDate[jitMatDateKey]; !exist && jitLine.ProductionQty > 0 {
@@ -700,15 +955,21 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 			var planId *int64
 
 			jitMatDateKey := fmt.Sprintf(`%s|%s`, dbMaterialCode, dbPlanDateStr)
-			if _, jitMatDateExist := jitMatDate[jitMatDateKey]; !jitMatDateExist && isNotInitPlaned {
+			_, jitMatDateExist := jitMatDate[jitMatDateKey]
+
+			if !jitMatDateExist && isNotInitPlaned {
+				matKey := dbMaterialCode
+
 				_, week := jitLineDB.DailyDate.ISOWeek()
 				weekKey := week
-				_, ignoreWeekExist := ignoreWeeks[weekKey]
+				_, ignoreWeekExist := ignoreWeeks[matKey][weekKey]
 
 				if !ignoreWeekExist {
 					productionQty = jitLineDB.ProductionQty
 					productionPlantQty = jitLineDB.ProductionPlantQty
 					productionSubconQty = jitLineDB.ProductionSubconQty
+				} else {
+					continue
 				}
 			}
 
@@ -1283,9 +1544,9 @@ func GetLineMap(sqlx *sqlx.DB, condition []string) (map[string]Line, error) {
 	rsMap := map[string]Line{}
 
 	query := fmt.Sprintf(`
-		select jlh.line_header_id as line_id 
+		select jlh.line_header_id as line_id
 			,  jlh.line_header_name as line_code
-		from jit_line_headers jlh 
+		from jit_line_headers jlh
 		where jlh.line_header_name in ('%s')
 	`, strings.Join(condition, `','`))
 	rows, err := db.ExecuteQuery(sqlx, query)
@@ -1314,7 +1575,7 @@ func GetMatrialMap(sqlx *sqlx.DB, condition []string) (map[string]Material, erro
 		select m.material_id ,m.material_code , m.supplier_id, coalesce(m.pallet_pattern, 0) pallet_pattern
 		,  coalesce(s.supplier_code , '') as supplier_code
 		from materials m
-		left join suppliers s on m.supplier_id  = s.supplier_id 
+		left join suppliers s on m.supplier_id  = s.supplier_id
 		where m.is_deleted = false and m.material_code in ('%s')
 	`, strings.Join(condition, `','`))
 	println(query)
@@ -1445,7 +1706,7 @@ func ConvertToProcessDB(jitPlans []JitDilyPlan, lineMap map[string]Line, materia
 			FGMaterialID:    materialMap.MaterialId,
 			LineName:        lineCode,
 			FGCode:          materialCode,
-			FGDescription:   fmt.Sprintf("Plan for %s", materialCode), //todo desc mat
+			FGDescription:   fmt.Sprintf("Plan for %s", materialCode),
 			PlanQty:         requestQty,
 			ProductSAP:      materialCode,
 			StartTime:       planStart,

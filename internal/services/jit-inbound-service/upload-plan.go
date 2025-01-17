@@ -97,7 +97,8 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	uploadPlan.IsBom = true
 	uploadPlan.IsCheckFg = true
 	uploadPlan.IsUrgentByStockDif = false
-	uploadPlan.IsInitPlaned = true
+	// uploadPlan.IsInitPlaned = true
+	uploadPlan.IsNotInitPlaned = true
 
 	_, err = CalculateUploadPlan(uploadPlan)
 	if err != nil {
