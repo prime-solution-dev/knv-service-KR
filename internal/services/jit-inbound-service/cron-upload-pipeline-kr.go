@@ -35,13 +35,23 @@ func UploadPlanPipelineKrCron() {
 	defer sqlx.Close()
 
 	startFileDate := time.Now().Truncate(24 * time.Hour)
-	startCalDate := GetStartCalDate(sqlx).Truncate(24 * time.Hour)
+	startCalDate := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
 	stockPath := `/Users/m4ru/Documents/Work/Prime/FileTest/JIT`
 	stockPrefixFile := `LX02_`
 	planPath := `/Users/m4ru/Documents/Work/Prime/FileTest/JIT`
 	planPrefixFile := `ZM35_`
 
 	ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
+}
+
+func GetStartCalDateKr(sqlx *sqlx.DB) time.Time {
+	result, err := db.ExecuteQuery(sqlx, "select start_cal_date_kr() date")
+
+	if err != nil {
+		return time.Now()
+	}
+
+	return result[0]["date"].(time.Time)
 }
 
 func UploadPlanPipelineKr(c *gin.Context, jsonPayload string) (interface{}, error) {

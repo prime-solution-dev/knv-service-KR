@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func GetStringValueOrNil(row map[string]interface{}, key string) *string {
@@ -45,6 +47,33 @@ func GetDefaultValue(row map[string]interface{}, key string, defaultType string)
 				return v
 			}
 			return int64(0)
+		case "datetime":
+			if v, ok := val.(time.Time); ok {
+				return v
+			}
+
+			shouldAddYear := []string{
+				"02 Jan 15:04",
+			}
+
+			if strVal, ok := val.(string); ok {
+				layouts := []string{
+					"2006-01-02",
+					"2006-01-02 15:04:05",
+					"2006-01-02T15:04:05Z",
+					"02 Jan 15:04",
+				}
+				for _, layout := range layouts {
+					if parsedTime, err := time.Parse(layout, strVal); err == nil {
+						if slices.Contains(shouldAddYear, layout) {
+							return time.Date(time.Now().Year(), parsedTime.Month(), parsedTime.Day(), parsedTime.Hour(), parsedTime.Minute(), 0, 0, &time.Location{})
+						}
+
+						return parsedTime
+					}
+				}
+			}
+			return time.Time{}
 		default:
 			return nil
 		}
@@ -59,6 +88,8 @@ func GetDefaultValue(row map[string]interface{}, key string, defaultType string)
 		return 0
 	case "int64":
 		return int64(0)
+	case "datetime":
+		return time.Time{}
 	default:
 		return nil
 	}

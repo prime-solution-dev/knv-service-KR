@@ -44,32 +44,25 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 		}
 
 		for _, row := range data {
-			materialCode := fmt.Sprintf("%d", utils.GetDefaultValue(row, "SKU SAP", "int64").(int64))
+			materialCode := fmt.Sprintf("%.0f", utils.GetDefaultValue(row, "SKU SAP", "float64").(float64))
+
+			if materialCode == "0" {
+				continue
+			}
+
 			lineCode := utils.GetDefaultValue(row, "Line", "string").(string)
 			requestQty := 0.0
-			requestPlanQty := utils.GetDefaultValue(row, "Plan Qty (dz)", "float").(float64) * convertQty
+			requestPlanQty := utils.GetDefaultValue(row, "Plan Qty (dz)", "float64").(float64) * convertQty
 			requestSubconQty := 0.0
-			startPlanDateVal := utils.GetDefaultValue(row, "Start time", "string").(string)
-			endPlanDateVal := utils.GetDefaultValue(row, "Finish time", "string").(string)
+
 			var startPlanDate time.Time
 			var endPlanDate *time.Time
 
-			if startPlanDateVal != "" {
-				date, err := time.Parse("2006-01-02 15:04:05", startPlanDateVal)
-				if err != nil {
-					return nil, fmt.Errorf("invalid convert start date: %w", err)
-				}
+			startPlanDate = utils.GetDefaultValue(row, "Start time", "datetime").(time.Time)
+			endPlanDate = &startPlanDate
 
-				startPlanDate = date
-			}
-
-			if endPlanDateVal != "" {
-				date, err := time.Parse("2006-01-02 15:04:05", endPlanDateVal)
-				if err != nil {
-					return nil, fmt.Errorf("invalid convert finish date: %w", err)
-				}
-
-				endPlanDate = &date
+			if endTimeVal, ok := utils.GetDefaultValue(row, "Finish time", "datetime").(time.Time); ok && !endTimeVal.IsZero() {
+				endPlanDate = &endTimeVal
 			}
 
 			plan := RequestPlan{
@@ -104,6 +97,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	uploadPlan.IsBom = true
 	uploadPlan.IsCheckFg = true
 	uploadPlan.IsUrgentByStockDif = false
+	uploadPlan.IsInitPlaned = true
 
 	_, err = CalculateUploadPlan(uploadPlan)
 	if err != nil {
@@ -114,7 +108,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 }
 
 func GetStartCalDate(sqlx *sqlx.DB) time.Time {
-	result, err := db.ExecuteQuery(sqlx, "select start_cal_date_kr() date")
+	result, err := db.ExecuteQuery(sqlx, "select last_recal_date() date")
 
 	if err != nil {
 		return time.Now()
@@ -127,11 +121,18 @@ func getMaterialStock(sqlx *sqlx.DB, materialCodes []string) ([]MaterialStock, e
 	matStock := []MaterialStock{}
 
 	query := fmt.Sprintf(`
-		select m.material_code
-			, coalesce (m.current_qty , 0) qty
-		from materials m 
-		where m.current_qty <> 0
-		and m.material_code in ('%s')
+		select
+			mat.material_code,
+			coalesce(mat.current_qty , 0) qty
+		from jit_master main
+        left join materials mat on mat.material_id = main.fb_material_id
+        where fg_material_id in (
+        	select material_id from materials
+            where
+                is_deleted = false and
+                inventory_mode = 3 and
+                material_code in ('%s')
+        ) and type = 1
 	`, strings.Join(materialCodes, `','`))
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {

@@ -22,6 +22,7 @@ type UploadPlanRequest struct {
 	IsBom              bool            `json:"is_bom"`
 	IsCheckFg          bool            `json:"is_check_fg"`
 	IsInitPlaned       bool            `json:"is_init_planed"`
+	IsNotInitPlaned    bool            `json:"is_not_init_planed"`
 	IsUrgentByStockDif bool            `json:"is_urgent_by_stock_dif"`
 	MaterialStocks     []MaterialStock `json:"material_stocks"`
 	RequestPlan        []RequestPlan   `json:"request_plan"`
@@ -87,6 +88,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	var mats []Material
 	matCheck := map[string]bool{}
 	reqMap := map[string][]RequestPlan{}
+	fgList := []string{}
 
 	for i, item := range reqPlan {
 		materialCode := item.MaterialCode
@@ -122,6 +124,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 			mats = append(mats, Material{
 				MaterialCode: materialCode,
 			})
+			fgList = append(fgList, materialCode)
 
 			matCheck[matKey] = true
 		}
@@ -173,7 +176,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error get jit daily db: %w", err)
 	}
 
-	jitDailyMap, err = MergeJitDaily(jitDailyMap, jitDailyDBMap)
+	jitDailyMap, err = MergeJitDaily(startDate, jitDailyMap, jitDailyDBMap, req.IsNotInitPlaned)
 	if err != nil {
 		return nil, fmt.Errorf("error merge jit daily: %w", err)
 	}
@@ -196,6 +199,11 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	}
 
 	adjustLeadtimeMap := GetAdjustLeadtimeRequire(sqlx)
+
+	fgMap, err := GetMatrialMap(sqlx, fgList)
+	if err != nil {
+		return nil, err
+	}
 
 	materialMap, err := GetMatrialMap(sqlx, materialCodes)
 	if err != nil {
@@ -222,7 +230,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error convert jit daily db: %w", err)
 	}
 
-	jitProcesses, err := ConvertToProcessDB(jitDailyPlan, lineMap, materialMap)
+	jitProcesses, err := ConvertToProcessDB(jitDailyPlan, lineMap, fgMap)
 	if err != nil {
 		return nil, fmt.Errorf("error convert jit plan db: %w", err)
 	}
@@ -617,7 +625,10 @@ func GetJitDailyDB(sqlx *sqlx.DB, startDate time.Time, matStrs []string) (map[st
 	return jitDailyMap, nil
 }
 
-func MergeJitDaily(jitLineMap map[string][]JitLine, jitLineDBMap map[string][]JitLine) (map[string][]JitLine, error) {
+func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLineDBMap map[string][]JitLine, isNotInitPlaned bool) (map[string][]JitLine, error) {
+	ignoreWeeks := map[int]bool{}
+	jitMatDate := map[string]bool{}
+
 	for jitLineKey, jitLines := range jitLineMap {
 		for jitLineDBKey, jitLineDB := range jitLineDBMap {
 			if jitLineKey == jitLineDBKey {
@@ -659,32 +670,72 @@ func MergeJitDaily(jitLineMap map[string][]JitLine, jitLineDBMap map[string][]Ji
 				}
 			}
 		}
+
+		for _, jitLine := range jitLines {
+			materialCode := jitLine.MaterialCode
+			planDate := jitLine.DailyDate
+			planDateStr := planDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+
+			_, week := planDate.ISOWeek()
+			weekKey := week
+			if _, exist := ignoreWeeks[weekKey]; !exist {
+				ignoreWeeks[weekKey] = true
+			}
+
+			jitMatDateKey := fmt.Sprintf(`%s|%s`, materialCode, planDateStr)
+			if _, exist := jitMatDate[jitMatDateKey]; !exist && jitLine.ProductionQty > 0 {
+				jitMatDate[jitMatDateKey] = true
+			}
+		}
 	}
 
 	for jitLineDBKey, jitLineDBs := range jitLineDBMap {
-		if _, exist := jitLineMap[jitLineDBKey]; !exist {
-			for _, jitLineDB := range jitLineDBs {
-				newJit := JitLine{
-					id:                  0,
-					PlanId:              nil,
-					DailyDate:           jitLineDB.DailyDate,
-					MaterialCode:        jitLineDB.MaterialCode,
-					LineCode:            jitLineDB.LineCode,
-					ProductionQty:       0,
-					ProductionPlantQty:  0,
-					ProductionSubconQty: 0,
-					RequireQty:          0,
-					UrgenQty:            0,
-					ConfirmRequireQty:   jitLineDB.ConfirmRequireQty,
-					ConfirmUrgentQty:    jitLineDB.ConfirmUrgentQty,
-					ConfirmRequireDate:  jitLineDB.ConfirmRequireDate,
-					ConfirmUrgentDate:   jitLineDB.ConfirmUrgentDate,
-					LeadTime:            jitLineDB.LeadTime,
-					RefReuqestID:        nil,
-				}
+		for _, jitLineDB := range jitLineDBs {
+			dbMaterialCode := jitLineDB.MaterialCode
+			dbPlanDate := jitLineDB.DailyDate
+			dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+			productionQty := 0.0
+			productionPlantQty := 0.0
+			productionSubconQty := 0.0
+			var planId *int64
 
-				jitLineMap[jitLineDBKey] = append(jitLineMap[jitLineDBKey], newJit)
+			jitMatDateKey := fmt.Sprintf(`%s|%s`, dbMaterialCode, dbPlanDateStr)
+			if _, jitMatDateExist := jitMatDate[jitMatDateKey]; !jitMatDateExist && isNotInitPlaned {
+				_, week := jitLineDB.DailyDate.ISOWeek()
+				weekKey := week
+				_, ignoreWeekExist := ignoreWeeks[weekKey]
+
+				if !ignoreWeekExist {
+					productionQty = jitLineDB.ProductionQty
+					productionPlantQty = jitLineDB.ProductionPlantQty
+					productionSubconQty = jitLineDB.ProductionSubconQty
+				}
 			}
+
+			if productionQty > 0 {
+				planId = jitLineDB.PlanId
+			}
+
+			newJit := JitLine{
+				id:                  0,
+				PlanId:              planId,
+				DailyDate:           jitLineDB.DailyDate,
+				MaterialCode:        jitLineDB.MaterialCode,
+				LineCode:            jitLineDB.LineCode,
+				ProductionQty:       productionQty,
+				ProductionPlantQty:  productionPlantQty,
+				ProductionSubconQty: productionSubconQty,
+				RequireQty:          0,
+				UrgenQty:            0,
+				ConfirmRequireQty:   jitLineDB.ConfirmRequireQty,
+				ConfirmUrgentQty:    jitLineDB.ConfirmUrgentQty,
+				ConfirmRequireDate:  jitLineDB.ConfirmRequireDate,
+				ConfirmUrgentDate:   jitLineDB.ConfirmUrgentDate,
+				LeadTime:            jitLineDB.LeadTime,
+				RefReuqestID:        nil,
+			}
+
+			jitLineMap[jitLineDBKey] = append(jitLineMap[jitLineDBKey], newJit)
 		}
 	}
 
@@ -1266,6 +1317,7 @@ func GetMatrialMap(sqlx *sqlx.DB, condition []string) (map[string]Material, erro
 		left join suppliers s on m.supplier_id  = s.supplier_id 
 		where m.is_deleted = false and m.material_code in ('%s')
 	`, strings.Join(condition, `','`))
+	println(query)
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
 		return nil, err
