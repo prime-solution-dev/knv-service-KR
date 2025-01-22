@@ -85,7 +85,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 		}
 	}
 
-	matStock, err := getMaterialStock(sqlx, materialCodes)
+	matStock, err := getMaterialStock(sqlx, materialCodes, false)
 	if err != nil {
 		return nil, err
 	}
@@ -118,8 +118,14 @@ func GetStartCalDate(sqlx *sqlx.DB) time.Time {
 	return result[0]["date"].(time.Time)
 }
 
-func getMaterialStock(sqlx *sqlx.DB, materialCodes []string) ([]MaterialStock, error) {
+func getMaterialStock(sqlx *sqlx.DB, materialCodes []string, isBom bool) ([]MaterialStock, error) {
 	matStock := []MaterialStock{}
+
+	filFilter := "fg_material_id"
+	if isBom {
+		filFilter = "fb_material_id"
+
+	}
 
 	query := fmt.Sprintf(`
 		select
@@ -127,14 +133,14 @@ func getMaterialStock(sqlx *sqlx.DB, materialCodes []string) ([]MaterialStock, e
 			coalesce(mat.current_qty , 0) qty
 		from jit_master main
         left join materials mat on mat.material_id = main.fb_material_id
-        where fg_material_id in (
+        where %s in (
         	select material_id from materials
             where
                 is_deleted = false and
                 inventory_mode = 3 and
                 material_code in ('%s')
         ) and type = 1
-	`, strings.Join(materialCodes, `','`))
+	`, filFilter, strings.Join(materialCodes, `','`))
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
 		return nil, err

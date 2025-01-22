@@ -139,11 +139,13 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 
 		rangeKey := materialCode
 		rageMatCal, exist := rageMatCalMap[rangeKey]
+		planDateWeekend := utils.GetWeekendDate(planDate)
+
 		if !exist {
 			newRageMatCal := rangeMaterialCal{
 				MaterialCode:  materialCode,
-				StartPlanDate: planDate,
-				EndPlanDate:   planDate,
+				StartPlanDate: startDate,
+				EndPlanDate:   planDateWeekend,
 			}
 
 			rageMatCalMap[rangeKey] = newRageMatCal
@@ -155,7 +157,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		}
 
 		if rageMatCal.EndPlanDate.Before(planDate) {
-			rageMatCal.EndPlanDate = planDate
+			rageMatCal.EndPlanDate = planDateWeekend
 		}
 		rageMatCalMap[rangeKey] = rageMatCal
 
@@ -184,7 +186,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	var jitDailyPlan []JitDilyPlan
 	var jitDailyMap map[string][]JitLine
 	if req.IsNotInitPlaned {
-		jitDailyPlan, jitDailyMap, err = BuildJitDailyByMaterial(rageMatCalMap, matLineMap, reqMap, matBompMap)
+		jitDailyPlan, jitDailyMap, err = BuildJitDailyByMaterial(req.StartCal, rageMatCalMap, matLineMap, reqMap, matBompMap)
 		if err != nil {
 			return nil, fmt.Errorf("error building JIT daily map: %w", err)
 		}
@@ -279,7 +281,12 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error convert jit plan db: %w", err)
 	}
 
-	err = CreateJitDaily(gormx, sqlx, jitProcesses, jitDailys, startDate)
+	materialIds := []int{}
+	for _, mat := range materialMap {
+		materialIds = append(materialIds, int(mat.MaterialId))
+	}
+
+	err = CreateJitDaily(gormx, sqlx, jitProcesses, jitDailys, startDate, req.IsNotInitPlaned, materialIds)
 	if err != nil {
 		return nil, fmt.Errorf("error create jit daily: %w", err)
 	}
@@ -450,7 +457,7 @@ func ValidationFg(planMap map[string][]RequestPlan, matBompMap map[string]Materi
 }
 
 // todo add
-func BuildJitDailyByMaterial(rageMatCalMap map[string]rangeMaterialCal, matLineMap map[string]map[string]MaterialLine, datas map[string][]RequestPlan, matBomMap map[string]Material) ([]JitDilyPlan, map[string][]JitLine, error) {
+func BuildJitDailyByMaterial(startCal time.Time, rageMatCalMap map[string]rangeMaterialCal, matLineMap map[string]map[string]MaterialLine, datas map[string][]RequestPlan, matBomMap map[string]Material) ([]JitDilyPlan, map[string][]JitLine, error) {
 	jitLineMap := map[string][]JitLine{}
 	JitDilyPlans := []JitDilyPlan{}
 	planIdCount := int64(1)
@@ -463,7 +470,7 @@ func BuildJitDailyByMaterial(rageMatCalMap map[string]rangeMaterialCal, matLineM
 			return nil, nil, fmt.Errorf(`not found rageMatCal of material code : %s`, materialCode)
 		}
 
-		startPlanDate := rageMatCal.StartPlanDate
+		startPlanDate := startCal
 		endPlanDate := rageMatCal.EndPlanDate
 
 		for currentDate := startPlanDate; !currentDate.After(endPlanDate); currentDate = currentDate.Add(24 * time.Hour) {
@@ -526,17 +533,16 @@ func BuildJitDailyByMaterial(rageMatCalMap map[string]rangeMaterialCal, matLineM
 									RefReuqestID:        nil,
 								}
 
-								if jitLine.ProductionQty == 0 || bom.Qty == 0 {
-									return nil, nil, fmt.Errorf(`productionQty or bom.qty = 0`)
+								if !(jitLine.ProductionQty == 0 || bom.Qty == 0) {
+									//waste
+									ProductionQty := (jitLine.ProductionQty / bom.Qty)
+									if waste != 0 {
+										ProductionQty *= (1 + waste/100)
+									}
+
+									jitLine.ProductionQty = ProductionQty
 								}
 
-								//waste
-								ProductionQty := (jitLine.ProductionQty / bom.Qty)
-								if waste != 0 {
-									ProductionQty *= (1 + waste/100)
-								}
-
-								jitLine.ProductionQty = ProductionQty
 								jitLineMap[jitLineBomKey] = append(jitLineMap[jitLineBomKey], jitLine)
 							}
 						} else {
@@ -923,14 +929,16 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 			planDate := jitLine.DailyDate
 			planDateStr := planDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
 
-			matKey := materialCode
-			_, week := planDate.ISOWeek()
-			weekKey := week
-			if _, exists := ignoreWeeks[matKey]; !exists {
-				ignoreWeeks[matKey] = make(map[int]bool)
-				ignoreWeeks[matKey][weekKey] = true
-			} else {
-				ignoreWeeks[matKey][weekKey] = true
+			if jitLine.ProductionQty > 0 {
+				matKey := materialCode
+				_, week := planDate.ISOWeek()
+				weekKey := week
+				if _, exists := ignoreWeeks[matKey]; !exists {
+					ignoreWeeks[matKey] = make(map[int]bool)
+					ignoreWeeks[matKey][weekKey] = true
+				} else {
+					ignoreWeeks[matKey][weekKey] = true
+				}
 			}
 
 			// if _, exist := ignoreWeeks[weekKey]; !exist {
@@ -947,17 +955,17 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 	for jitLineDBKey, jitLineDBs := range jitLineDBMap {
 		for _, jitLineDB := range jitLineDBs {
 			dbMaterialCode := jitLineDB.MaterialCode
-			dbPlanDate := jitLineDB.DailyDate
-			dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+			// dbPlanDate := jitLineDB.DailyDate
+			// dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
 			productionQty := 0.0
 			productionPlantQty := 0.0
 			productionSubconQty := 0.0
 			var planId *int64
 
-			jitMatDateKey := fmt.Sprintf(`%s|%s`, dbMaterialCode, dbPlanDateStr)
-			_, jitMatDateExist := jitMatDate[jitMatDateKey]
+			// jitMatDateKey := fmt.Sprintf(`%s|%s`, dbMaterialCode, dbPlanDateStr)
+			// _, jitMatDateExist := jitMatDate[jitMatDateKey]
 
-			if !jitMatDateExist && isNotInitPlaned {
+			if isNotInitPlaned {
 				matKey := dbMaterialCode
 
 				_, week := jitLineDB.DailyDate.ISOWeek()
@@ -1729,7 +1737,7 @@ func ConvertToProcessDB(jitPlans []JitDilyPlan, lineMap map[string]Line, materia
 	return jitProcesses, nil
 }
 
-func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, jitDailys []JitDaily, startDate time.Time) error {
+func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, jitDailys []JitDaily, startDate time.Time, IsNotInitPlaned bool, bomMats []int) error {
 	mats := []int64{}
 	matCheck := map[int64]bool{}
 	for _, item := range jitDailys {
@@ -1751,14 +1759,16 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		return fmt.Errorf("failed to get max process id: %w", err)
 	}
 
-	for i := range jitProcesses {
-		jitProcesses[i].JitProcessID += maxProcessID
-		allProcessidInsert = append(allProcessidInsert, strconv.Itoa(int(jitProcesses[i].JitProcessID)))
-	}
+	if len(jitProcesses) > 0 {
+		for i := range jitProcesses {
+			jitProcesses[i].JitProcessID += maxProcessID
+			allProcessidInsert = append(allProcessidInsert, strconv.Itoa(int(jitProcesses[i].JitProcessID)))
+		}
 
-	if err := tx.Create(&jitProcesses).Error; err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to insert JitProcesses: %w", err)
+		if err := tx.Create(&jitProcesses).Error; err != nil {
+			tx.Rollback()
+			return fmt.Errorf("failed to insert JitProcesses: %w", err)
+		}
 	}
 
 	// Insert JitDailys
@@ -1780,12 +1790,17 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		}
 	}
 
-	if err := tx.Model(&JitDaily{}).
+	clearTx := tx.Model(&JitDaily{})
+
+	if IsNotInitPlaned {
+		clearTx = clearTx.Where("material_id in ?", bomMats)
+	}
+
+	if err := clearTx.
 		Where("daily_date >= ?", startDate).
 		Updates(map[string]interface{}{"is_deleted": true}).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to update is_deleted status: %w", err)
-
 	}
 
 	if err := tx.CreateInBatches(&jitDailys, 1000).Error; err != nil {
