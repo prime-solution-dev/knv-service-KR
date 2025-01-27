@@ -10,38 +10,40 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-func ReadExcelFile(c *gin.Context, formFieldName, sheetName string) ([]map[string]interface{}, error) {
+func ReadExcelFile(c *gin.Context, formFieldName, sheetName string) ([]map[string]interface{}, string, error) {
 	file, err := c.FormFile(formFieldName)
+	fileName := file.Filename
+
 	if err != nil {
-		return nil, fmt.Errorf("file upload error: %w", err)
+		return nil, fileName, fmt.Errorf("file upload error: %w", err)
 	}
 
 	f, err := file.Open()
 	if err != nil {
-		return nil, fmt.Errorf("unable to open file: %w", err)
+		return nil, fileName, fmt.Errorf("unable to open file: %w", err)
 	}
 	defer f.Close()
 
 	xlsx, err := excelize.OpenReader(f)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read Excel file: %w", err)
+		return nil, fileName, fmt.Errorf("unable to read Excel file: %w", err)
 	}
 
 	if sheetName == "" {
 		sheets := xlsx.GetSheetList()
 		if len(sheets) == 0 {
-			return nil, errors.New("no sheet found in the Excel file")
+			return nil, fileName, errors.New("no sheet found in the Excel file")
 		}
 		sheetName = sheets[0]
 	}
 
 	rows, err := xlsx.GetRows(sheetName)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read rows from sheet: %w", err)
+		return nil, fileName, fmt.Errorf("unable to read rows from sheet: %w", err)
 	}
 
 	if len(rows) < 2 {
-		return nil, errors.New("no data found in the Excel file")
+		return nil, fileName, errors.New("no data found in the Excel file")
 	}
 
 	headers := rows[0]
@@ -91,5 +93,5 @@ func ReadExcelFile(c *gin.Context, formFieldName, sheetName string) ([]map[strin
 		results = append(results, record)
 	}
 
-	return results, nil
+	return results, fileName, nil
 }

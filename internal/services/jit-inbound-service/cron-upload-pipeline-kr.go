@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"jnv-jit/internal/cronjob"
 	"jnv-jit/internal/db"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -34,11 +35,12 @@ func UploadPlanPipelineKrCron() {
 	sqlx, _ := db.ConnectSqlx(`jit_portal`)
 	defer sqlx.Close()
 
+	filePath := os.Getenv("kr_file_path")
 	startFileDate := time.Now().Truncate(24 * time.Hour)
 	startCalDate := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
-	stockPath := `/Users/m4ru/Documents/Work/Prime/FileTest/JIT`
+	stockPath := filePath
 	stockPrefixFile := `LX02_`
-	planPath := `/Users/m4ru/Documents/Work/Prime/FileTest/JIT`
+	planPath := filePath
 	planPrefixFile := `ZM35_`
 
 	ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
@@ -297,7 +299,7 @@ func ReadPlan(datas []map[string]interface{}, matStockMap map[string]MaterialSto
 		lineCode := ""
 		subconStockQtyStr := data["Col9"].(string)
 		condition := data["Col11"].(string)
-		numColumns := len(data) //todo ทำไมมันขาดไปอัน
+		numColumns := len(data)
 		startCol := 11
 		endCol := numColumns
 

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"jnv-jit/internal/db"
+	"jnv-jit/internal/models"
+	uploadlog "jnv-jit/internal/services/upload_log"
 	"jnv-jit/internal/utils"
 	"strings"
 	"time"
@@ -36,12 +38,15 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	materialCodes := []string{}
 	materialCodeCheck := map[string]bool{}
 	convertQty := 12.0
+	var uploadFileName string
 
 	for fieldName := range form.File {
-		data, err := utils.ReadExcelFile(c, fieldName, ``)
+		data, fileName, err := utils.ReadExcelFile(c, fieldName, ``)
 		if err != nil {
 			return nil, err
 		}
+
+		uploadFileName = fileName
 
 		for _, row := range data {
 			materialCode := fmt.Sprintf("%.0f", utils.GetDefaultValue(row, "SKU SAP", "float64").(float64))
@@ -97,15 +102,25 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	uploadPlan.IsBom = true
 	uploadPlan.IsCheckFg = true
 	uploadPlan.IsUrgentByStockDif = false
-	// uploadPlan.IsInitPlaned = true
 	uploadPlan.IsNotInitPlaned = true
 
 	_, err = CalculateUploadPlan(uploadPlan)
+
+	uploadMessage := "success"
+	if err != nil {
+		uploadMessage = err.Error()
+	}
+
+	err = uploadlog.AddUploadLog(sqlx, uploadFileName, 0, err == nil, uploadMessage, 0)
+
 	if err != nil {
 		return nil, err
 	}
 
-	return nil, nil
+	return models.BaseResponse{
+		Success: err == nil,
+		Message: uploadMessage,
+	}, nil
 }
 
 func GetStartCalDate(sqlx *sqlx.DB) time.Time {

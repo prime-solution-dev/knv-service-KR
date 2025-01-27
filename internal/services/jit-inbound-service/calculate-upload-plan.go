@@ -182,7 +182,6 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		}
 	}
 
-	//todo adatedd&up
 	var jitDailyPlan []JitDilyPlan
 	var jitDailyMap map[string][]JitLine
 	if req.IsNotInitPlaned {
@@ -196,7 +195,6 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 			return nil, fmt.Errorf("error building JIT daily map: %w", err)
 		}
 	}
-	//
 
 	if len(jitDailyPlan) == 0 || len(jitDailyMap) == 0 {
 		return nil, fmt.Errorf("jitPlan or jitLine not found (%w)", err)

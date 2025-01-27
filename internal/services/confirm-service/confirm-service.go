@@ -145,8 +145,7 @@ func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
 		uploadReason = errMsg
 	}
 
-	// userIDValue := reqBody.UserId
-
+	//todo: [Nil] Move to use from common code.
 	sql := fmt.Sprintf(`INSERT INTO upload_logs (
 		master_name,
 		type,
@@ -170,8 +169,6 @@ func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
 		time.Now().Format(time.RFC3339),
 		time.Now().Format(time.RFC3339),
 		uploadReason, reqBody.UserId)
-
-	println(sql)
 	_, err = db.ExecuteQuery(sqlx, sql)
 
 	if err != nil {
