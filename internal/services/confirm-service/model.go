@@ -193,8 +193,3 @@ type UploadLog struct {
 func (UploadLog) TableName() string {
 	return "upload_logs"
 }
-
-type ConfirmResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}

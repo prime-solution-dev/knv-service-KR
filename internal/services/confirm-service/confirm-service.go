@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"jnv-jit/internal/db"
+	"jnv-jit/internal/models"
+	uploadlog "jnv-jit/internal/services/upload_log"
 	"sort"
 	"strings"
 	"time"
@@ -145,37 +147,13 @@ func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
 		uploadReason = errMsg
 	}
 
-	//todo: [Nil] Move to use from common code.
-	sql := fmt.Sprintf(`INSERT INTO upload_logs (
-		master_name,
-		type,
-		file_name,
-		upload_row,
-		status,
-		percent,
-		import_date,
-		last_update_date,
-		upload_reason,
-		action_by
-	) VALUES (
-		'%s', '%s', '%s', %d, %t, %d, '%s', '%s', '%s', %d
-	)`,
-		"jit-daily-confirm-delivery",
-		"-",
-		filename,
-		uploadRow,
-		uploadStatus,
-		100,
-		time.Now().Format(time.RFC3339),
-		time.Now().Format(time.RFC3339),
-		uploadReason, reqBody.UserId)
-	_, err = db.ExecuteQuery(sqlx, sql)
+	err = uploadlog.AddUploadLog(sqlx, filename, uploadRow, uploadStatus, uploadReason, reqBody.UserId)
 
 	if err != nil {
 		return nil, err
 	}
 
-	return ConfirmResponse{
+	return models.BaseResponse{
 		Success: uploadStatus,
 		Message: uploadReason,
 	}, nil
@@ -225,7 +203,7 @@ func getConfirmData(sqlx *sqlx.DB, startDate time.Time, materialUpdates []string
 		materialCode := item["material_code"].(string)
 		confDate := (item["conf_date"].(time.Time))
 		confDateStr := confDate.Format("2006-01-02")
-		urgentConfDate := (item["conf_date"].(time.Time))
+		urgentConfDate := (item["conf_urgent_date"].(time.Time))
 		urgentConfDateStr := urgentConfDate.Format("2006-01-02")
 		confirmQty := item["conf_qty"].(float64)
 		confirmUrgentQty := item["conf_urgent_qty"].(float64)
@@ -265,8 +243,8 @@ func getConfirmData(sqlx *sqlx.DB, startDate time.Time, materialUpdates []string
 		}
 
 		if confirmUrgentQty > 0 {
-			confDataMapValue.ConfQty += confirmQty
-			confDataMapValue.ConfUrgentDate = &urgentConfDate
+			urgentConfDataMapValue.ConfUrgentQty += confirmUrgentQty
+			urgentConfDataMapValue.ConfUrgentDate = &urgentConfDate
 		}
 
 		result[key] = urgentConfDataMapValue
@@ -445,9 +423,9 @@ func updateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinM
 				updateData["conf_date"] = confirmItem.ConfirmDate
 			}
 
-			if confirmItem.ConfirmUrgentQty != 0 && confirmItem.ConfirmDate != nil {
-				updateData["conf_urgent_qty"] = confirmItem.ConfirmQty
-				updateData["conf_urgent_date"] = confirmItem.ConfirmDate
+			if confirmItem.ConfirmUrgentQty != 0 && confirmItem.UrgentDate != nil {
+				updateData["conf_urgent_qty"] = confirmItem.ConfirmUrgentQty
+				updateData["conf_urgent_date"] = confirmItem.UrgentDate
 			}
 
 			err := gorm.Model(&JitDaily{}).Where("jit_daily_id = ?", confirmItem.JitDailyID).Updates(updateData).Error
