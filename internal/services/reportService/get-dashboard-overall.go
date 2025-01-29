@@ -40,7 +40,7 @@ func GetDashboardOverall(c *gin.Context, jsonPayload string) (interface{}, error
 		return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
 	}
 
-	sqlx, err := db.ConnectSqlx(`jit_portal_kr`)
+	sqlx, err := db.ConnectSqlx(`jit_portal`)
 	if err != nil {
 		return nil, err
 	}

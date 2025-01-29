@@ -168,13 +168,13 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("failed to get BOM: %w", err)
 	}
 
-	if isBom {
-		// rageMatCalMap = GetRangeMatCal(matBompMap, reqPlan)
+	// if isBom {
+	// 	// rageMatCalMap = GetRangeMatCal(matBompMap, reqPlan)
 
-		if err := ValidationBom(reqMap, matBompMap); err != nil {
-			return nil, fmt.Errorf("failed to validation bom: %w", err)
-		}
-	}
+	// 	if err := ValidationBom(reqMap, matBompMap); err != nil {
+	// 		return nil, fmt.Errorf("failed to validation bom: %w", err)
+	// 	}
+	// }
 
 	if isCheckFg {
 		if err := ValidationFg(reqMap, matBompMap); err != nil {
@@ -983,6 +983,10 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 				planId = jitLineDB.PlanId
 			}
 
+			if productionQty == 0 && jitLineDB.ConfirmRequireQty == 0 && jitLineDB.ConfirmUrgentQty == 0 {
+				continue
+			}
+
 			newJit := JitLine{
 				id:                  0,
 				PlanId:              planId,
@@ -1583,6 +1587,7 @@ func GetMatrialMap(sqlx *sqlx.DB, condition []string) (map[string]Material, erro
 		from materials m
 		left join suppliers s on m.supplier_id  = s.supplier_id
 		where m.is_deleted = false and m.material_code in ('%s')
+		order by m.material_code, m.pallet_pattern desc
 	`, strings.Join(condition, `','`))
 	println(query)
 	rows, err := db.ExecuteQuery(sqlx, query)

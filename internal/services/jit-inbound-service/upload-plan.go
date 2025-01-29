@@ -100,7 +100,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 	uploadPlan.MaterialStocks = matStock
 	uploadPlan.RequestPlan = plans
 	uploadPlan.IsBom = true
-	uploadPlan.IsCheckFg = true
+	uploadPlan.IsCheckFg = false
 	uploadPlan.IsUrgentByStockDif = false
 	uploadPlan.IsNotInitPlaned = true
 

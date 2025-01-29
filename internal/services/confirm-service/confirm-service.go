@@ -458,7 +458,6 @@ func updateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinM
 
 func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate time.Time, confirmData map[string]ConfirmDetailData) error {
 	var jitDailyConfirmDetail []JitBaseConfirmDetail
-	// jitDailyConfirmDetailMap := make(map[string]JitBaseConfirmDetail)
 	endOfStockMap := make(map[string]float64)
 
 	qSql := ""
@@ -529,7 +528,6 @@ func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate
 
 		key := fmt.Sprintf("%s|%s", materialCode, date)
 
-		// jitDailyConfirmDetailMap[key] = detailData
 		jitDailyConfirmDetail = append(jitDailyConfirmDetail, detailData)
 		endOfStockMap[key] = confirmDetail["end_of_stock"].(float64)
 	}
@@ -575,7 +573,6 @@ func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate
 			endOfStock = beforeLast - jitDaily.ProductQty + confQty + urgentQty
 		}
 
-		// jitDailyConfirmDetail[index].EndOfStock = endOfStock
 		endOfStockMap[mainKey] = endOfStock
 
 		err := tx.Model(&JitDaily{}).Where("material_id = ? and daily_date = ?", jitDaily.MaterialID, jitDaily.DailyDate.Format("2006-01-02")).Updates(map[string]interface{}{

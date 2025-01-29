@@ -22,7 +22,7 @@ func GetMondayOfCurrentWeek() string {
 func GetStartRecal() {
 	//Todo function
 
-	// sqlx, err := db.ConnectSqlx(`jit_portal_kr`)
+	// sqlx, err := db.ConnectSqlx(`jit_portal`)
 	// if err != nil {
 	// 	return nil, err
 	// }

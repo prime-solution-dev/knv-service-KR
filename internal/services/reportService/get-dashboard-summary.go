@@ -91,7 +91,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 		return nil, errors.New("failed to unmarshal JSON into struct: " + err.Error())
 	}
 
-	sqlx, err := db.ConnectSqlx(`jit_portal_kr`)
+	sqlx, err := db.ConnectSqlx(`jit_portal`)
 	if err != nil {
 		return nil, err
 	}
@@ -100,11 +100,11 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 	qCondSupplier := ``
 	qCondMaterial := ``
 	qCondWeekData := ``
-	week := 0
+	// week := 0
 
-	if req.WeekData != 0 {
-		week = req.WeekData
-	}
+	// if req.WeekData != 0 {
+	// 	week = req.WeekData
+	// }
 
 	// startDate := GetMondayOfCurrentWeek()
 	// firstDate := GetEarliestMonday(time.Now(), week-1).AddDate(0, 0, 7)
@@ -118,7 +118,7 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 		qCondMaterial = fmt.Sprintf(` and m.material_code in ('%s')`, strings.Join(req.Materials, `','`))
 	}
 
-	qCondWeekData = fmt.Sprintf(` and jd.daily_date between (current_date - interval '%d weeks') and '%s' `, week, GetMondayDateOfCurrentWeek().AddDate(0, 0, -1).Format("2006-01-02"))
+	qCondWeekData = fmt.Sprintf(` and jd.daily_date >= current_date`)
 
 	qCondUser := fmt.Sprintf(` and case when util_is_admin(%d) then true else 
         case
