@@ -244,14 +244,17 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 
 	adjustLeadtimeMap := GetAdjustLeadtimeRequire(sqlx)
 
-	fgMap, err := GetMatrialMap(sqlx, fgList)
-	if err != nil {
-		return nil, err
-	}
-
-	materialMap, err := GetMatrialMap(sqlx, materialCodes)
-	if err != nil {
-		return nil, err
+	var materialMap map[string]Material
+	if req.IsBom {
+		materialMap, err = GetMatrialMap(sqlx, fgList)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		materialMap, err = GetMatrialMap(sqlx, materialCodes)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	jitMats, err = CalculateEstimate(jitMats, adjustLeadtimeMap, maxLineId, materialMap)
@@ -274,7 +277,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error convert jit daily db: %w", err)
 	}
 
-	jitProcesses, err := ConvertToProcessDB(jitDailyPlan, lineMap, fgMap)
+	jitProcesses, err := ConvertToProcessDB(jitDailyPlan, lineMap, materialMap)
 	if err != nil {
 		return nil, fmt.Errorf("error convert jit plan db: %w", err)
 	}
@@ -374,7 +377,7 @@ func GetBom(sqlx *sqlx.DB, mats []Material, isBom bool) (map[string]Material, er
 		left join suppliers s on m.supplier_id = s.supplier_id
 		left join materials mb on mb.material_id = jm.fb_material_id
 		where 1=1
-		and m.material_code in ('%s')
+		and m.inventory_mode = 3 and m.material_code in ('%s')
 	`, strings.Join(matStr, `','`))
 	// and m.inventory_mode = 3 and coalesce(jm.type, 1) = 1
 	//println(query)
@@ -1217,7 +1220,7 @@ func GetLastEndStockMaterial(sqlx *sqlx.DB, materialCodes []string, startCalDate
 		from materials m
 		left join suppliers s on m.supplier_id  = s.supplier_id
 		left join (select * from jit_daily where is_deleted = false order by jit_daily_id desc) jd on jd.material_id = m.material_id
-		where m.is_deleted = false
+		where m.is_deleted = false and m.inventory_mode = 3
 	`
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
@@ -1586,7 +1589,7 @@ func GetMatrialMap(sqlx *sqlx.DB, condition []string) (map[string]Material, erro
 		,  coalesce(s.supplier_code , '') as supplier_code
 		from materials m
 		left join suppliers s on m.supplier_id  = s.supplier_id
-		where m.is_deleted = false and m.material_code in ('%s')
+		where m.is_deleted = false and m.inventory_mode = 3 and m.material_code in ('%s')
 		order by m.material_code, m.pallet_pattern desc
 	`, strings.Join(condition, `','`))
 	println(query)
@@ -1704,7 +1707,7 @@ func ConvertToProcessDB(jitPlans []JitDilyPlan, lineMap map[string]Line, materia
 
 		materialMap, materialExist := materialMap[materialCode]
 		if !materialExist {
-			return nil, fmt.Errorf("material not found for materialCode: %s", materialCode)
+			continue
 		}
 
 		if planEnd == nil {
