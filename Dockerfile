@@ -9,7 +9,7 @@ COPY . .
 
 COPY cmd/.env /app/.env
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o knv-service ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o knv-service-kr ./cmd/main.go
 
 FROM alpine:latest
 
@@ -19,10 +19,10 @@ RUN ln -s /usr/share/zoneinfo/Asia/Bangkok /etc/localtime
 
 WORKDIR /app
 
-COPY --from=builder /app/knv-service /app/knv-service
+COPY --from=builder /app/knv-service-kr /app/knv-service-kr
 
 COPY --from=builder /app/.env /app/.env
 
 EXPOSE 8080
 
-CMD ["/app/knv-service-KR"]
+CMD ["/app/knv-service-kr"]
