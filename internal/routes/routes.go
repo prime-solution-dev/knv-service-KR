@@ -58,4 +58,9 @@ func RegisterRoutes(router *gin.Engine) {
 	router.GET("/JITInbound/recal-lx02", func(c *gin.Context) {
 		utils.ProcessRequestPayload(c, jitInboundService.RecalLx02)
 	})
+
+	router.GET("/JITInbound/manual-kr-pipeline", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, jitInboundService.ManualKrPipeline)
+	})
+
 }

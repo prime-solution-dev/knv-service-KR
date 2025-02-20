@@ -244,18 +244,22 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 
 	adjustLeadtimeMap := GetAdjustLeadtimeRequire(sqlx)
 
-	var materialMap map[string]Material
-	if req.IsBom {
-		materialMap, err = GetMatrialMap(sqlx, fgList)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		materialMap, err = GetMatrialMap(sqlx, materialCodes)
-		if err != nil {
-			return nil, err
-		}
+	materialMap, err := GetMatrialMap(sqlx, materialCodes)
+	if err != nil {
+		return nil, fmt.Errorf("error can not get material map: %w", err)
 	}
+	// var materialMap map[string]Material
+	// if req.IsBom {
+	// 	materialMap, err = GetMatrialMap(sqlx, fgList)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// } else {
+	// 	materialMap, err = GetMatrialMap(sqlx, materialCodes)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	jitMats, err = CalculateEstimate(jitMats, adjustLeadtimeMap, maxLineId, materialMap)
 	if err != nil {
@@ -1646,6 +1650,8 @@ func ConvertToJitDailyDB(jitMats []JitMaterial, lineMap map[string]Line, materia
 				if material, exist := materialMap[materialCode]; exist {
 					materialId = material.MaterialId
 					supplierId = material.SupplierId
+				} else {
+					println(materialCode)
 				}
 
 				jitDaily := JitDaily{

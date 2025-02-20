@@ -111,7 +111,7 @@ func UploadPlan(c *gin.Context) (interface{}, error) {
 		uploadMessage = err.Error()
 	}
 
-	err = uploadlog.AddUploadLog(sqlx, uploadFileName, 0, err == nil, uploadMessage, 0)
+	err = uploadlog.AddUploadLog(sqlx, "jit-plan", uploadFileName, 0, err == nil, uploadMessage, 0)
 
 	if err != nil {
 		return nil, err

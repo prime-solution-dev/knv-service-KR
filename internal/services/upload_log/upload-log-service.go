@@ -8,7 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func AddUploadLog(sqlx *sqlx.DB, filename string, uploadRow int, uploadStatus bool, uploadReason string, uploadBy int) error {
+func AddUploadLog(sqlx *sqlx.DB, masterName string, filename string, uploadRow int, uploadStatus bool, uploadReason string, uploadBy int) error {
 	sql := fmt.Sprintf(`INSERT INTO upload_logs (
 		master_name,
 		type,
@@ -23,7 +23,7 @@ func AddUploadLog(sqlx *sqlx.DB, filename string, uploadRow int, uploadStatus bo
 	) VALUES (
 		'%s', '%s', '%s', %d, %t, %d, '%s', '%s', '%s', %d
 	)`,
-		"jit-daily-confirm-delivery",
+		masterName,
 		"-",
 		filename,
 		uploadRow,

@@ -6,13 +6,18 @@ import (
 	"fmt"
 	"jnv-jit/internal/cronjob"
 	"jnv-jit/internal/db"
+	"jnv-jit/internal/services/sftpService"
+	"jnv-jit/internal/utils"
+	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/joho/godotenv"
 	"gorm.io/gorm"
 )
 
@@ -26,9 +31,19 @@ type UploadPlanPipelineKrRequest struct {
 }
 
 func init() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	} //todo: wait refactor to use reuseable code.
+
 	cronjob.RegisterJob("upload-pipeline-kr-sun", UploadPlanPipelineKrCron, `0 18 * * 0`)
 	cronjob.RegisterJob("upload-pipeline-kr-tue", UploadPlanPipelineKrCron, `0 4 * * 2`)
 	cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `0 4 * * 4`)
+	println("register kr jobs successfully...")
+}
+
+func Init() {
+
 }
 
 func UploadPlanPipelineKrCron() {
@@ -43,7 +58,106 @@ func UploadPlanPipelineKrCron() {
 	planPath := filePath
 	planPrefixFile := `ZM35_`
 
-	ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
+	err := processGetFiles(filePath)
+	if err != nil {
+		println("can't get file")
+	} else {
+		ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
+	}
+}
+
+func processGetFiles(downloadPath string) error {
+	lx02Path := os.Getenv("lx02_path")
+	zm35Path := os.Getenv("zm35_path")
+
+	client, sshConn, err := sftpService.NewClient()
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	defer sshConn.Close()
+
+	lx02Files, err := client.ReadDir(lx02Path)
+	if err != nil {
+		return err
+	}
+
+	lx02LatestFile, err := utils.GetLatestFile(lx02Files)
+	if err != nil {
+		return err
+	}
+
+	zm35Files, err := client.ReadDir(zm35Path)
+	if err != nil {
+		return err
+	}
+
+	zm35LatestFile, err := utils.GetLatestFile(zm35Files)
+	if err != nil {
+		return err
+	}
+
+	downloadFunc := func(dstPath string, remotePath string) error {
+		remoteFile, err := client.Open(remotePath)
+		if err != nil {
+			return err
+		}
+
+		dstFile, err := os.Create(dstPath)
+		if err != nil {
+			return err
+		}
+		defer dstFile.Close()
+
+		if _, err := remoteFile.WriteTo(dstFile); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	lx02LocalFilePath := filepath.Join(downloadPath, lx02LatestFile.Name())
+	lx02RemoteFilePath := lx02Path + "/" + lx02LatestFile.Name()
+	err = downloadFunc(lx02LocalFilePath, lx02RemoteFilePath)
+	if err != nil {
+		return err
+	}
+
+	zm35LocalFilePath := filepath.Join(downloadPath, zm35LatestFile.Name())
+	zm35RemoteFilePath := zm35Path + "/" + zm35LatestFile.Name()
+	err = downloadFunc(zm35LocalFilePath, zm35RemoteFilePath)
+	if err != nil {
+		return err
+	}
+
+	sshConn.Close()
+	client.Close()
+
+	return nil
+}
+
+func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
+	sqlx, _ := db.ConnectSqlx(`jit_portal`)
+	defer sqlx.Close()
+
+	filePath := os.Getenv("kr_file_path")
+	startFileDate := time.Now().Truncate(24 * time.Hour)
+	startCalDate := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
+	stockPath := filePath
+	stockPrefixFile := `LX02_`
+	planPath := filePath
+	planPrefixFile := `ZM35_`
+
+	err := processGetFiles(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("can't get file")
+	} else {
+		if err := ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, nil
 }
 
 func GetStartCalDateKr(sqlx *sqlx.DB) time.Time {

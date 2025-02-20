@@ -147,7 +147,7 @@ func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
 		uploadReason = errMsg
 	}
 
-	err = uploadlog.AddUploadLog(sqlx, filename, uploadRow, uploadStatus, uploadReason, reqBody.UserId)
+	err = uploadlog.AddUploadLog(sqlx, "jit-daily-confirm-delivery", filename, uploadRow, uploadStatus, uploadReason, reqBody.UserId)
 
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func Confirm(c *gin.Context, jsonPayload string) (interface{}, error) {
 }
 
 func getStartDate(sqlx *sqlx.DB) time.Time {
-	result, err := db.ExecuteQuery(sqlx, "select start_cal_date_kr() date") //todo: change function name
+	result, err := db.ExecuteQuery(sqlx, "select get_start_cal_date() date")
 
 	if err != nil {
 		return time.Now()
@@ -459,6 +459,7 @@ func updateConfirm(gorm *gorm.DB, confirmDataMap ConfirmDataList) ([]ConfirmMinM
 func recalActual(tx *gorm.DB, sqlx *sqlx.DB, data []ConfirmMinMatDate, startDate time.Time, confirmData map[string]ConfirmDetailData) error {
 	var jitDailyConfirmDetail []JitBaseConfirmDetail
 	endOfStockMap := make(map[string]float64)
+	startDate = startDate.Truncate(time.Hour * 24)
 
 	qSql := ""
 
