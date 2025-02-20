@@ -150,7 +150,7 @@ func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
 
 	err := processGetFiles(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("can't get file")
+		return nil, fmt.Errorf(fmt.Sprintf("can't get file : %w", err))
 	} else {
 		if err := ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile); err != nil {
 			return nil, err
