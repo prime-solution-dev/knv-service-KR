@@ -10,6 +10,7 @@ import (
 	"jnv-jit/internal/utils"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -36,14 +37,16 @@ func init() {
 		log.Fatal("Error loading .env file")
 	} //todo: wait refactor to use reuseable code.
 
-	cronjob.RegisterJob("upload-pipeline-kr-sun", UploadPlanPipelineKrCron, `0 18 * * 0`)
-	cronjob.RegisterJob("upload-pipeline-kr-tue", UploadPlanPipelineKrCron, `0 4 * * 2`)
-	cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `0 4 * * 4`)
+	cronjob.RegisterJob("upload-pipeline-kr-sun", GetFilesKr, `0 18 * * 0`)
+	cronjob.RegisterJob("upload-pipeline-kr-tue", GetFilesKr, `0 4 * * 2`)
+	cronjob.RegisterJob("upload-pipeline-kr-thu", GetFilesKr, `0 4 * * 4`)
+	cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `*/1 * * * *`)
 	println("register kr jobs successfully...")
 }
 
-func Init() {
-
+func GetFilesKr() {
+	filePath := os.Getenv("kr_file_path")
+	processGetFiles(filePath)
 }
 
 func UploadPlanPipelineKrCron() {
@@ -58,12 +61,14 @@ func UploadPlanPipelineKrCron() {
 	planPath := filePath
 	planPrefixFile := `ZM35_`
 
-	err := processGetFiles(filePath)
-	if err != nil {
-		println("can't get file")
-	} else {
-		ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
-	}
+	// err := processGetFiles(filePath)
+	// if err != nil {
+	// 	println("can't get file")
+	// } else {
+	// 	ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
+	// }
+
+	ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
 }
 
 func processGetFiles(downloadPath string) error {
@@ -271,6 +276,10 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 		return err
 	}
 
+	if stockFilePath == "" || planFilePath == "" {
+		return nil
+	}
+
 	planDatas, err := ReadPlainText(planFilePath)
 	if err != nil {
 		return err
@@ -353,6 +362,10 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 	if err != nil {
 		return err
 	}
+
+	backup_file_path := os.Getenv("kr_file_path")
+
+	exec.Command("mv", fmt.Sprintf("%s/**", stockPath), backup_file_path).Output()
 
 	return nil
 }
