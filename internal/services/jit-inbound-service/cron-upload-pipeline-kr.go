@@ -280,6 +280,10 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 		return nil
 	}
 
+	backup_file_path := os.Getenv("kr_file_path")
+
+	exec.Command("mv", fmt.Sprintf("%s/**", stockPath), backup_file_path).Output()
+
 	planDatas, err := ReadPlainText(planFilePath)
 	if err != nil {
 		return err
@@ -362,10 +366,6 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 	if err != nil {
 		return err
 	}
-
-	backup_file_path := os.Getenv("kr_file_path")
-
-	exec.Command("mv", fmt.Sprintf("%s/**", stockPath), backup_file_path).Output()
 
 	return nil
 }
