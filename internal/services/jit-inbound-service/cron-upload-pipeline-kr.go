@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"jnv-jit/internal/cronjob"
 	"jnv-jit/internal/db"
 	"jnv-jit/internal/services/sftpService"
 	"jnv-jit/internal/utils"
@@ -37,10 +36,10 @@ func init() {
 		log.Fatal("Error loading .env file")
 	} //todo: wait refactor to use reuseable code.
 
-	cronjob.RegisterJob("upload-pipeline-kr-sun", GetFilesKr, `0 18 * * 0`)
-	cronjob.RegisterJob("upload-pipeline-kr-tue", GetFilesKr, `0 4 * * 2`)
-	cronjob.RegisterJob("upload-pipeline-kr-thu", GetFilesKr, `0 4 * * 4`)
-	cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `*/1 * * * *`)
+	// cronjob.RegisterJob("upload-pipeline-kr-sun", GetFilesKr, `0 18 * * 0`)
+	// cronjob.RegisterJob("upload-pipeline-kr-tue", GetFilesKr, `0 4 * * 2`)
+	// cronjob.RegisterJob("upload-pipeline-kr-thu", GetFilesKr, `0 4 * * 4`)
+	// cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `*/1 * * * *`)
 	println("register kr jobs successfully...")
 }
 
