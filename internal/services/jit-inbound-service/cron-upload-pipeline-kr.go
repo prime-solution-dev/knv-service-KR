@@ -46,7 +46,7 @@ func init() {
 
 func GetFilesKr() {
 	filePath := os.Getenv("kr_file_path")
-	processGetFiles(filePath)
+	processGetFiles(filePath, "LX02_", "ZM35_")
 }
 
 func UploadPlanPipelineKrCron() {
@@ -71,7 +71,7 @@ func UploadPlanPipelineKrCron() {
 	ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile)
 }
 
-func processGetFiles(downloadPath string) error {
+func processGetFiles(downloadPath string, lx02Prefix, zm35Prefix string) error {
 	lx02Path := os.Getenv("lx02_path")
 	zm35Path := os.Getenv("zm35_path")
 
@@ -87,7 +87,7 @@ func processGetFiles(downloadPath string) error {
 		return err
 	}
 
-	lx02LatestFile, err := utils.GetLatestFile(lx02Files)
+	lx02LatestFile, err := utils.GetLatestFile(lx02Files, lx02Prefix)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func processGetFiles(downloadPath string) error {
 		return err
 	}
 
-	zm35LatestFile, err := utils.GetLatestFile(zm35Files)
+	zm35LatestFile, err := utils.GetLatestFile(zm35Files, zm35Prefix)
 	if err != nil {
 		return err
 	}
@@ -135,9 +135,6 @@ func processGetFiles(downloadPath string) error {
 		return err
 	}
 
-	sshConn.Close()
-	client.Close()
-
 	return nil
 }
 
@@ -153,7 +150,7 @@ func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
 	planPath := filePath
 	planPrefixFile := `ZM35_`
 
-	err := processGetFiles(filePath)
+	err := processGetFiles(filePath, "LX02_KRJIT_DAILY320_20250311_044003.csv", "ZM35_KRJIT_20250311_042731.xls")
 	if err != nil {
 		return nil, fmt.Errorf(fmt.Sprintf("can't get file : %w", err))
 	} else {
