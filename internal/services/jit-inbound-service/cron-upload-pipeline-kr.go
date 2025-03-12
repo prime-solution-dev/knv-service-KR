@@ -40,7 +40,7 @@ func init() {
 	cronjob.RegisterJob("upload-pipeline-kr-sun", GetFilesKr, `0 18 * * 0`)
 	cronjob.RegisterJob("upload-pipeline-kr-tue", GetFilesKr, `0 4 * * 2`)
 	cronjob.RegisterJob("upload-pipeline-kr-thu", GetFilesKr, `0 4 * * 4`)
-	cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `*/1 * * * *`)
+	// cronjob.RegisterJob("upload-pipeline-kr-thu", UploadPlanPipelineKrCron, `*/1 * * * *`)
 	println("register kr jobs successfully...")
 }
 
@@ -150,7 +150,7 @@ func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
 	planPath := filePath
 	planPrefixFile := `ZM35_`
 
-	err := processGetFiles(filePath, "LX02_KRJIT_DAILY320_20250311_044003.csv", "ZM35_KRJIT_20250311_042731.xls")
+	err := processGetFiles(filePath, stockPrefixFile, planPrefixFile)
 	if err != nil {
 		return nil, fmt.Errorf(fmt.Sprintf("can't get file : %w", err))
 	} else {
