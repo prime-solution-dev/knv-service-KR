@@ -55,7 +55,8 @@ func UploadPlanPipelineKrCron() {
 
 	filePath := os.Getenv("kr_file_path")
 	startCalDateFromDb := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
-	startFileDate := startCalDateFromDb
+	// startFileDate := startCalDateFromDb
+	startFileDate := time.Now().Truncate(24 * time.Hour)
 	startCalDate := startCalDateFromDb
 	stockPath := filePath
 	stockPrefixFile := `LX02_`
@@ -144,9 +145,9 @@ func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
 	defer sqlx.Close()
 
 	filePath := os.Getenv("kr_file_path")
-	// startFileDate := time.Now().Truncate(24 * time.Hour)
+	startFileDate := time.Now().Truncate(24 * time.Hour)
 	startCalDateFromDb := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
-	startFileDate := startCalDateFromDb
+	// startFileDate := startCalDateFromDb
 	startCalDate := startCalDateFromDb
 	stockPath := filePath
 	stockPrefixFile := `LX02_`
