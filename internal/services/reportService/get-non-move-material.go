@@ -45,10 +45,8 @@ func GetNonMoveMaterial(c *gin.Context, jsonPayload string) (interface{}, error)
                         ,coalesce(greatest(last_gr, last_gi
                         )::varchar, '99') AS last_move_date
                 from materials m
-            where (current_date - greatest(last_gr, last_gi)) > %s
+            where (current_date - greatest(last_gr, last_gi)) > %d
 	`, req.OverDate)
-
-	// fmt.Println(query)
 
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {

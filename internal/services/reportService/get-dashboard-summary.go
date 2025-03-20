@@ -212,7 +212,8 @@ func GetDashboardSummary(c *gin.Context, jsonPayload string) (interface{}, error
 	}
 
 	if len(matDay) == 0 {
-		return nil, errors.New(`not found materials`)
+		return nil, nil
+		// return nil, errors.New(`not found materials`)
 	}
 
 	queryMatDay := fmt.Sprintf(`

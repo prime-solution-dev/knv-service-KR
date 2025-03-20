@@ -151,7 +151,6 @@ func GetDashboardOverall(c *gin.Context, jsonPayload string) (interface{}, error
 			res.TotalUrgent++
 			res.TotalRequest++
 		}
-
 	}
 
 	return res, nil

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"jnv-jit/internal/cronjob"
 	"jnv-jit/internal/routes"
 	"log"
 	"os"
@@ -18,6 +19,8 @@ func main() {
 
 	router := gin.Default()
 	routes.RegisterRoutes(router)
+
+	cronjob.AutoStartCronJobs()
 
 	port := os.Getenv("port")
 	log.Printf("Starting server on port: %s ,as time: %s\n", port, time.Now())
