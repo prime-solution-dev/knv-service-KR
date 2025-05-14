@@ -96,15 +96,49 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	matCheck := map[string]bool{}
 	reqMap := map[string][]RequestPlan{}
 	fgList := []string{}
-	rageMatCalMap := map[string]rangeMaterialCal{} //todo add
+	rageMatCalMap := map[string]rangeMaterialCal{}
+	subconMasterMap := map[string]int{}
+	subconQtyDateMap := map[string]float64{}
+
+	subconSql := "select material_code, coalesce(subcon_offset_day, 0) subcon_offset_day from materials where is_deleted = false and inventory_mode = 3"
+
+	rows, err := db.ExecuteQuery(sqlx, subconSql)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range rows {
+		subconMasterMap[item["material_code"].(string)] = int(item["subcon_offset_day"].(float64))
+	}
+
+	for _, item := range reqPlan {
+		var backwardDays int = 0
+
+		backwardDaysValue, exists := subconMasterMap[item.MaterialCode]
+		if exists {
+			backwardDays = -(backwardDaysValue)
+		}
+
+		planDate := item.PlanDate.Truncate(24 * time.Hour)
+		planDateBackwaredStr := planDate.AddDate(0, 0, backwardDays).Format("2006-01-02")
+		key := fmt.Sprintf("%s|%s", item.MaterialCode, planDateBackwaredStr)
+		subconQtyDateMap[key] = item.RequestSubconQty
+	}
 
 	for i, item := range reqPlan {
 		materialCode := item.MaterialCode
 		lineCode := item.LineCode
 		requestPlanQty := item.RequestPlantQty
-		requestSubconQty := item.RequestSubconQty
 		planDate := item.PlanDate.Truncate(24 * time.Hour)
 		planDateStr := planDate.Format("2006-01-02")
+		requestSubconQtyKey := fmt.Sprintf("%s|%s", materialCode, planDateStr)
+
+		requestSubconQty := 0.0
+
+		requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
+		if exists {
+			requestSubconQty = requestSubconQtyValue
+		}
 
 		newReq := item
 		newReq.RequestQty = requestPlanQty + requestSubconQty
@@ -1824,11 +1858,11 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
-	_, err := db.ExecuteQuery(sqlx, sql)
-	if err != nil {
-		return fmt.Errorf("failed to push process id to require: %w", err)
-	}
+	// sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
+	// _, err := db.ExecuteQuery(sqlx, sql)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to push process id to require: %w", err)
+	// }
 
 	return nil
 }
