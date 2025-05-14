@@ -97,33 +97,33 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	reqMap := map[string][]RequestPlan{}
 	fgList := []string{}
 	rageMatCalMap := map[string]rangeMaterialCal{}
-	subconMasterMap := map[string]int{}
-	subconQtyDateMap := map[string]float64{}
+	// subconMasterMap := map[string]int{}
+	// subconQtyDateMap := map[string]float64{}
 
-	subconSql := "select material_code, coalesce(subcon_offset_day, 0) subcon_offset_day from materials where is_deleted = false and inventory_mode = 3"
+	// subconSql := "select material_code, coalesce(subcon_offset_day, 0) subcon_offset_day from materials where is_deleted = false and inventory_mode = 3"
 
-	rows, err := db.ExecuteQuery(sqlx, subconSql)
-	if err != nil {
-		return nil, err
-	}
+	// rows, err := db.ExecuteQuery(sqlx, subconSql)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	for _, item := range rows {
-		subconMasterMap[item["material_code"].(string)] = int(item["subcon_offset_day"].(float64))
-	}
+	// for _, item := range rows {
+	// 	subconMasterMap[item["material_code"].(string)] = int(item["subcon_offset_day"].(float64))
+	// }
 
-	for _, item := range reqPlan {
-		var backwardDays int = 0
+	// for _, item := range reqPlan {
+	// 	var backwardDays int = 0
 
-		backwardDaysValue, exists := subconMasterMap[item.MaterialCode]
-		if exists {
-			backwardDays = -(backwardDaysValue)
-		}
+	// 	backwardDaysValue, exists := subconMasterMap[item.MaterialCode]
+	// 	if exists {
+	// 		backwardDays = -(backwardDaysValue)
+	// 	}
 
-		planDate := item.PlanDate.Truncate(24 * time.Hour)
-		planDateBackwaredStr := planDate.AddDate(0, 0, backwardDays).Format("2006-01-02")
-		key := fmt.Sprintf("%s|%s", item.MaterialCode, planDateBackwaredStr)
-		subconQtyDateMap[key] = item.RequestSubconQty
-	}
+	// 	planDate := item.PlanDate.Truncate(24 * time.Hour)
+	// 	planDateBackwaredStr := planDate.AddDate(0, 0, backwardDays).Format("2006-01-02")
+	// 	key := fmt.Sprintf("%s|%s", item.MaterialCode, planDateBackwaredStr)
+	// 	subconQtyDateMap[key] = item.RequestSubconQty
+	// }
 
 	for i, item := range reqPlan {
 		materialCode := item.MaterialCode
@@ -131,14 +131,15 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		requestPlanQty := item.RequestPlantQty
 		planDate := item.PlanDate.Truncate(24 * time.Hour)
 		planDateStr := planDate.Format("2006-01-02")
-		requestSubconQtyKey := fmt.Sprintf("%s|%s", materialCode, planDateStr)
+		// requestSubconQtyKey := fmt.Sprintf("%s|%s", materialCode, planDateStr)
 
-		requestSubconQty := 0.0
+		// requestSubconQty := 0.0
 
-		requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
-		if exists {
-			requestSubconQty = requestSubconQtyValue
-		}
+		// requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
+		// if exists {
+		// 	requestSubconQty = requestSubconQtyValue
+		// }
+		requestSubconQty := item.RequestSubconQty
 
 		newReq := item
 		newReq.RequestQty = requestPlanQty + requestSubconQty
