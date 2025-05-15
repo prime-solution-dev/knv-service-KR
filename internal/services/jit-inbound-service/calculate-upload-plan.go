@@ -97,32 +97,52 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	reqMap := map[string][]RequestPlan{}
 	fgList := []string{}
 	rageMatCalMap := map[string]rangeMaterialCal{}
-	// subconMasterMap := map[string]int{}
-	// subconQtyDateMap := map[string]float64{}
+	subconMasterMap := map[string]int{}
+	subconQtyDateMap := map[string]float64{}
+	urgentWithSubconOverCalDateMap := map[string]bool{}
 
-	// subconSql := "select material_code, coalesce(subcon_offset_day, 0) subcon_offset_day from materials where is_deleted = false and inventory_mode = 3"
+	subconSql := "select material_code, coalesce(subcon_offset_day, 0) subcon_offset_day from materials where is_deleted = false and inventory_mode = 3"
 
-	// rows, err := db.ExecuteQuery(sqlx, subconSql)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	rows, err := db.ExecuteQuery(sqlx, subconSql)
+	if err != nil {
+		return nil, err
+	}
 
-	// for _, item := range rows {
-	// 	subconMasterMap[item["material_code"].(string)] = int(item["subcon_offset_day"].(float64))
-	// }
+	for _, item := range rows {
+		subconMasterMap[item["material_code"].(string)] = int(item["subcon_offset_day"].(float64))
+	}
 
-	// for _, item := range reqPlan {
-	// 	var backwardDays int = 0
+	for _, item := range reqPlan {
+		var backwardDays int = 0
 
-	// 	backwardDaysValue, exists := subconMasterMap[item.MaterialCode]
+		backwardDaysValue, exists := subconMasterMap[item.MaterialCode]
+		if exists {
+			backwardDays = -(backwardDaysValue)
+		}
+
+		planDate := item.PlanDate.Truncate(24 * time.Hour)
+		planDateBackwaredDate := planDate.AddDate(0, 0, backwardDays)
+		planDateBackwaredDateStr := planDateBackwaredDate.Format(time.DateOnly)
+
+		if planDateBackwaredDate.Before(startDate) {
+			planDateBackwaredDateStr = startDate.Format(time.DateOnly)
+			key := fmt.Sprintf("%s|%s", item.MaterialCode, planDateBackwaredDateStr)
+			urgentWithSubconOverCalDateMap[key] = true
+		}
+
+		key := fmt.Sprintf("%s|%s", item.MaterialCode, planDateBackwaredDateStr)
+		subconQtyDateMap[key] = item.RequestSubconQty
+	}
+
+	// for index, item := range reqMatStock {
+	// 	requestSubconQtyKey := fmt.Sprintf("%s|%s", item.MaterialCode, item.)
+	// 	requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
 	// 	if exists {
-	// 		backwardDays = -(backwardDaysValue)
+	// 		reqMatStock[index].StockSubconQty = requestSubconQtyValue
+	// 	} else {
+	// 		reqMatStock[index].StockSubconQty = 0
 	// 	}
-
-	// 	planDate := item.PlanDate.Truncate(24 * time.Hour)
-	// 	planDateBackwaredStr := planDate.AddDate(0, 0, backwardDays).Format("2006-01-02")
-	// 	key := fmt.Sprintf("%s|%s", item.MaterialCode, planDateBackwaredStr)
-	// 	subconQtyDateMap[key] = item.RequestSubconQty
+	// 	// reqMatStock[index]
 	// }
 
 	for i, item := range reqPlan {
@@ -131,17 +151,21 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		requestPlanQty := item.RequestPlantQty
 		planDate := item.PlanDate.Truncate(24 * time.Hour)
 		planDateStr := planDate.Format("2006-01-02")
-		// requestSubconQtyKey := fmt.Sprintf("%s|%s", materialCode, planDateStr)
-
-		// requestSubconQty := 0.0
-
-		// requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
-		// if exists {
-		// 	requestSubconQty = requestSubconQtyValue
-		// }
-		requestSubconQty := item.RequestSubconQty
+		requestSubconQtyKey := fmt.Sprintf("%s|%s", materialCode, planDateStr)
 
 		newReq := item
+		requestSubconQty := 0.0
+
+		requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
+		if exists {
+			requestSubconQty = requestSubconQtyValue
+			newReq.RequestSubconQty = requestSubconQtyValue
+		} else {
+			requestSubconQty = 0
+			newReq.RequestSubconQty = 0
+		}
+		// requestSubconQty := item.RequestSubconQty
+
 		newReq.RequestQty = requestPlanQty + requestSubconQty
 
 		resKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, materialCode, lineCode)
@@ -225,7 +249,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 			return nil, fmt.Errorf("error building JIT daily map: %w", err)
 		}
 	} else {
-		jitDailyPlan, jitDailyMap, err = BuildJitDaily(startDate, endDate, matLineMap, reqMap, matBompMap)
+		jitDailyPlan, jitDailyMap, err = BuildJitDaily(startDate, endDate, matLineMap, reqMap, matBompMap, subconQtyDateMap)
 		if err != nil {
 			return nil, fmt.Errorf("error building JIT daily map: %w", err)
 		}
@@ -255,7 +279,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error get jit daily db: %w", err)
 	}
 
-	jitDailyMap, err = MergeJitDaily(startDate, jitDailyMap, jitDailyDBMap, req.IsNotInitPlaned)
+	jitDailyMap, err = MergeJitDaily(startDate, jitDailyMap, jitDailyDBMap, req.IsNotInitPlaned, subconQtyDateMap)
 	if err != nil {
 		return nil, fmt.Errorf("error merge jit daily: %w", err)
 	}
@@ -296,7 +320,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	// 	}
 	// }
 
-	jitMats, err = CalculateEstimate(jitMats, adjustLeadtimeMap, maxLineId, materialMap)
+	jitMats, err = CalculateEstimate(jitMats, adjustLeadtimeMap, maxLineId, materialMap, urgentWithSubconOverCalDateMap)
 	if err != nil {
 		return nil, fmt.Errorf("error calculate estimate: %w", err)
 	}
@@ -658,7 +682,7 @@ func BuildJitDailyByMaterial(startCal time.Time, rageMatCalMap map[string]rangeM
 	return JitDilyPlans, jitLineMap, nil
 }
 
-func BuildJitDaily(startDate time.Time, endDate time.Time, matLineMap map[string]map[string]MaterialLine, datas map[string][]RequestPlan, matBomMap map[string]Material) ([]JitDilyPlan, map[string][]JitLine, error) {
+func BuildJitDaily(startDate time.Time, endDate time.Time, matLineMap map[string]map[string]MaterialLine, datas map[string][]RequestPlan, matBomMap map[string]Material, subconQtyMap map[string]float64) ([]JitDilyPlan, map[string][]JitLine, error) {
 	jitLineMap := map[string][]JitLine{}
 	JitDilyPlans := []JitDilyPlan{}
 	planIdCount := int64(1)
@@ -918,7 +942,7 @@ func GetJitDailyDB(sqlx *sqlx.DB, startDate time.Time, matStrs []string) (map[st
 	return jitDailyMap, nil
 }
 
-func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLineDBMap map[string][]JitLine, isNotInitPlaned bool) (map[string][]JitLine, error) {
+func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLineDBMap map[string][]JitLine, isNotInitPlaned bool, subconQtyDateMap map[string]float64) (map[string][]JitLine, error) {
 	ignoreWeeks := map[string]map[int]bool{}
 	jitMatDate := map[string]bool{}
 
@@ -995,12 +1019,23 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 	for jitLineDBKey, jitLineDBs := range jitLineDBMap {
 		for _, jitLineDB := range jitLineDBs {
 			dbMaterialCode := jitLineDB.MaterialCode
-			// dbPlanDate := jitLineDB.DailyDate
-			// dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+			dbPlanDate := jitLineDB.DailyDate
+			dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
 			productionQty := 0.0
 			productionPlantQty := 0.0
 			productionSubconQty := 0.0
 			var planId *int64
+
+			requestSubconQtyKey := fmt.Sprintf("%s|%s", dbMaterialCode, dbPlanDateStr)
+			requestSubconQtyValue, exists := subconQtyDateMap[requestSubconQtyKey]
+			if exists {
+				jitLineMap[jitLineDBKey][0].ProductionSubconQty = requestSubconQtyValue
+				if jitLineMap[jitLineDBKey][0].ProductionQty == 0 {
+					jitLineMap[jitLineDBKey][0].ProductionQty = requestSubconQtyValue
+				}
+				// productionSubconQty = requestSubconQtyValue
+			}
+			// reqMatStock[index]
 
 			// jitMatDateKey := fmt.Sprintf(`%s|%s`, dbMaterialCode, dbPlanDateStr)
 			// _, jitMatDateExist := jitMatDate[jitMatDateKey]
@@ -1025,7 +1060,7 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 				planId = jitLineDB.PlanId
 			}
 
-			if productionQty == 0 && jitLineDB.ConfirmRequireQty == 0 && jitLineDB.ConfirmUrgentQty == 0 {
+			if productionQty == 0 && jitLineDB.ConfirmRequireQty == 0 && jitLineDB.ConfirmUrgentQty == 0 && productionSubconQty == 0 {
 				continue
 			}
 
@@ -1353,7 +1388,7 @@ func GetAdjustLeadtimeRequire(sqlx *sqlx.DB) map[string]AdjustLeadtime {
 	return adjustLeadtimeMap
 }
 
-func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]AdjustLeadtime, maxLineId int64, materialMap map[string]Material) ([]JitMaterial, error) {
+func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]AdjustLeadtime, maxLineId int64, materialMap map[string]Material, subconUrgentMap map[string]bool) ([]JitMaterial, error) {
 	maxId := maxLineId + 1
 
 	//Function
@@ -1453,7 +1488,15 @@ func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]Adjus
 					startUpdateData += adjustLeadtime.Adjust
 				}
 
-				if startUpdateData < 0 {
+				key := fmt.Sprintf("%s|%s", jitMats[cMat].MaterialCode, jitDate.Date.Format(time.DateOnly))
+
+				isUrgentWithSubconQtyOverCalDate := false
+
+				if value, exists := subconUrgentMap[key]; exists {
+					isUrgentWithSubconQtyOverCalDate = value
+				}
+
+				if startUpdateData < 0 || isUrgentWithSubconQtyOverCalDate {
 					startUpdateData = 0
 					isUrgent = true
 				}
@@ -1844,7 +1887,7 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 	}
 
 	if err := clearTx.
-		Where("daily_date >= ?", startDate).
+		Where("daily_date >= ? and material_id = 1419", startDate).
 		Updates(map[string]interface{}{"is_deleted": true}).Error; err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to update is_deleted status: %w", err)
@@ -1859,11 +1902,11 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
-	_, err := db.ExecuteQuery(sqlx, sql)
-	if err != nil {
-		return fmt.Errorf("failed to push process id to require: %w", err)
-	}
+	// sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
+	// _, err := db.ExecuteQuery(sqlx, sql)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to push process id to require: %w", err)
+	// }
 
 	return nil
 }
