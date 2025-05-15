@@ -90,22 +90,24 @@ type JitMaterial struct {
 }
 
 type JitDate struct {
-	Date               time.Time
-	BeginStock         float64
-	PlantSock          float64
-	SubconStock        float64
-	ProductionQty      float64
-	RequireQty         float64
-	UrgentQty          float64
-	Diff               float64
-	EstimateStock      float64
-	ConfirmQty         float64
-	ConfirmRequireQty  float64
-	ConfirmUrgentQty   float64
-	ConfirmRequireDate *time.Time
-	ConfirmUrgentDate  *time.Time
-	EndStock           float64
-	Lines              []JitLine
+	Date                    time.Time
+	BeginStock              float64
+	PlantSock               float64
+	SubconStock             float64
+	ProductionQty           float64
+	ProductionQtyFromPlant  float64
+	ProductionQtyFromSubcon float64
+	RequireQty              float64
+	UrgentQty               float64
+	Diff                    float64
+	EstimateStock           float64
+	ConfirmQty              float64
+	ConfirmRequireQty       float64
+	ConfirmUrgentQty        float64
+	ConfirmRequireDate      *time.Time
+	ConfirmUrgentDate       *time.Time
+	EndStock                float64
+	Lines                   []JitLine
 }
 
 type JitLine struct {

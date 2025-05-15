@@ -125,7 +125,9 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	// 	subconQtyDateMap[key] = item.RequestSubconQty
 	// }
 
-	for i, item := range reqPlan {
+	endDate = startDate.AddDate(0, 0, 27)
+
+	for _, item := range reqPlan {
 		materialCode := item.MaterialCode
 		lineCode := item.LineCode
 		requestPlanQty := item.RequestPlantQty
@@ -147,9 +149,9 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		resKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, materialCode, lineCode)
 		reqMap[resKey] = append(reqMap[resKey], newReq)
 
-		if i == 0 || endDate.Before(newReq.PlanDate) {
-			endDate = newReq.PlanDate
-		}
+		// if i == 0 || endDate.Before(newReq.PlanDate) {
+		// 	endDate = newReq.PlanDate
+		// }
 
 		materialKey := materialCode
 		materialLineKey := fmt.Sprintf(`%s|%s`, materialCode, lineCode)
@@ -260,6 +262,18 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 		return nil, fmt.Errorf("error merge jit daily: %w", err)
 	}
 
+	subconQtyMap := map[string]float64{}
+	sql := "select material_code, coalesce(subcon_offset_day, 0) subcon_offset_day from materials where is_deleted = false and inventory_mode = 3"
+	rows, err := db.ExecuteQuery(sqlx, sql)
+
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range rows {
+		subconQtyMap[item["material_code"].(string)] = item["subcon_offset_day"].(float64)
+	}
+
 	jitMats, confirmMap, materialCodes, lineCodes, maxLineId, err := BuildToCalStruct(req.StartCal, jitDailyMap, reqMatStock)
 	if err != nil {
 		return nil, fmt.Errorf("error build cal struct: %w", err)
@@ -296,7 +310,7 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	// 	}
 	// }
 
-	jitMats, err = CalculateEstimate(jitMats, adjustLeadtimeMap, maxLineId, materialMap)
+	jitMats, err = CalculateEstimate(jitMats, adjustLeadtimeMap, maxLineId, materialMap, subconQtyMap)
 	if err != nil {
 		return nil, fmt.Errorf("error calculate estimate: %w", err)
 	}
@@ -419,7 +433,7 @@ func GetBom(sqlx *sqlx.DB, mats []Material, isBom bool) (map[string]Material, er
 		and m.inventory_mode = 3 and m.material_code in ('%s')
 	`, strings.Join(matStr, `','`))
 	// and m.inventory_mode = 3 and coalesce(jm.type, 1) = 1
-	//println(query)
+	println(query)
 	rows, err := db.ExecuteQuery(sqlx, query)
 	if err != nil {
 		return nil, err
@@ -1142,16 +1156,18 @@ func BuildToCalStruct(startCal time.Time, jitLineMap map[string][]JitLine, matSt
 			}
 
 			newJitDate := JitDate{
-				Date:               planDateTrucn,
-				ProductionQty:      productQty,
-				RequireQty:         requireQty,
-				UrgentQty:          urgentQty,
-				ConfirmQty:         confirmRequireQty + confirmUrgentQty,
-				ConfirmRequireQty:  confirmRequireQty,
-				ConfirmUrgentQty:   confirmUrgentQty,
-				ConfirmRequireDate: confirmRequireDate,
-				ConfirmUrgentDate:  confirmUrgentDate,
-				Lines:              []JitLine{newJitLine},
+				Date:                    planDateTrucn,
+				ProductionQty:           productQty,
+				ProductionQtyFromPlant:  productPlantQty,
+				ProductionQtyFromSubcon: productSubconQty,
+				RequireQty:              requireQty,
+				UrgentQty:               urgentQty,
+				ConfirmQty:              confirmRequireQty + confirmUrgentQty,
+				ConfirmRequireQty:       confirmRequireQty,
+				ConfirmUrgentQty:        confirmUrgentQty,
+				ConfirmRequireDate:      confirmRequireDate,
+				ConfirmUrgentDate:       confirmUrgentDate,
+				Lines:                   []JitLine{newJitLine},
 			}
 
 			newJitMat := JitMaterial{
@@ -1353,7 +1369,7 @@ func GetAdjustLeadtimeRequire(sqlx *sqlx.DB) map[string]AdjustLeadtime {
 	return adjustLeadtimeMap
 }
 
-func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]AdjustLeadtime, maxLineId int64, materialMap map[string]Material) ([]JitMaterial, error) {
+func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]AdjustLeadtime, maxLineId int64, materialMap map[string]Material, subconQtyMap map[string]float64) ([]JitMaterial, error) {
 	maxId := maxLineId + 1
 
 	//Function
@@ -1411,8 +1427,178 @@ func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]Adjus
 				}
 			}
 
+			// Require case (subcon)
+			if jitDate.BeginStock-jitDate.ProductionQtyFromSubcon < 0 && jitDate.ProductionQtyFromSubcon > 0 {
+				var palletPattern float64 = 0
+
+				if material, exists := materialMap[jitMats[cMat].MaterialCode]; exists {
+					palletPattern = *material.PalletPattern
+				}
+
+				isUrgent := false
+				var leadTime int64 = 0
+
+				if value, exists := subconQtyMap[jitMats[cMat].MaterialCode]; exists {
+					leadTime = int64(value)
+				}
+
+				requireQty := math.Abs(jitDate.BeginStock - jitDate.ProductionQtyFromSubcon)
+				requireQty = math.Ceil(requireQty/palletPattern) * palletPattern
+				currentDateCount := int64(cDate)
+				startUpdateData := currentDateCount - leadTime
+
+				shortDay := ""
+				if startUpdateData >= 0 {
+					shortDay = utils.GetShortWeekday(jitMats[cMat].JitDates[startUpdateData].Date)
+				} else {
+					shortDay = utils.GetShortWeekday(time.Now())
+				}
+
+				// shortDay = utils.GetShortWeekday(jitMats[cMat].JitDates[startUpdateData].Date)
+				adjustLeadtimeKey := shortDay
+				adjustLeadtime, adjustLeadtimeExist := adjustLeadtimeMap[adjustLeadtimeKey]
+
+				// if startUpdateData < 0 {
+				// 	startUpdateData = 0
+				// 	isUrgent = true
+				// } else if adjustLeadtimeExist {
+				// 	startUpdateData += adjustLeadtime.Adjust
+
+				// 	if startUpdateData < 0 {
+				// 		startUpdateData = 0
+				// 		isUrgent = true
+				// 	}
+				// }
+
+				if adjustLeadtimeExist {
+					startUpdateData += adjustLeadtime.Adjust
+				}
+
+				if startUpdateData < 0 {
+					startUpdateData = 0
+					isUrgent = true
+				}
+
+				for current := startUpdateData; current <= currentDateCount; current++ {
+					if current == startUpdateData {
+						if isUrgent {
+							jitMats[cMat].JitDates[current].UrgentQty += requireQty
+						} else {
+							jitMats[cMat].JitDates[current].RequireQty += requireQty
+						}
+
+						requireLineMap := map[string]map[string]JitLine{}
+						for _, requireJitLine := range jitMats[cMat].JitDates[current].Lines {
+							lineCode := requireJitLine.LineCode
+							linePlan := createLinePlanKey(lineCode, requireJitLine.PlanId)
+
+							if _, exist := requireLineMap[lineCode]; !exist {
+								requireLineMap[lineCode] = map[string]JitLine{}
+							}
+
+							requireLineMap[lineCode][linePlan] = requireJitLine
+						}
+
+						remainRequire := requireQty
+						for i, productionJitLine := range jitDate.Lines {
+							productionId := productionJitLine.id
+							lineCode := productionJitLine.LineCode
+							planId := productionJitLine.PlanId
+							requireLine := productionJitLine.ProductionQty
+							linePlan := createLinePlanKey(lineCode, planId)
+							lineBlank := createLinePlanKey(lineCode, nil)
+
+							if remainRequire < requireLine || i+1 == len(jitDate.Lines) {
+								requireLine = remainRequire
+							}
+
+							if _, planExist := requireLineMap[lineCode][linePlan]; planExist {
+								updateJitLineQty(jitMats[cMat].JitDates[current].Lines, lineCode, planId, productionId, requireLine, isUrgent)
+							} else if _, blankExist := requireLineMap[lineCode][lineBlank]; blankExist {
+								updateJitLineQty(jitMats[cMat].JitDates[current].Lines, lineCode, nil, productionId, requireLine, isUrgent)
+							} else {
+								newJitLine := JitLine{
+									id:                  maxId,
+									PlanId:              planId,
+									RefReuqestID:        &productionId,
+									MaterialCode:        jitMats[cMat].MaterialCode,
+									DailyDate:           jitMats[cMat].JitDates[current].Date,
+									LineCode:            lineCode,
+									ProductionQty:       0,
+									ProductionPlantQty:  0,
+									ProductionSubconQty: 0,
+									RequireQty:          0,
+									UrgenQty:            0,
+									ConfirmRequireQty:   0,
+									ConfirmUrgentQty:    0,
+									ConfirmRequireDate:  nil,
+									ConfirmUrgentDate:   nil,
+								}
+
+								if isUrgent {
+									newJitLine.UrgenQty = requireLine
+								} else {
+									newJitLine.RequireQty = requireLine
+								}
+
+								jitMats[cMat].JitDates[current].Lines = append(jitMats[cMat].JitDates[current].Lines, newJitLine)
+								maxId++
+							}
+
+							remainRequire -= requireLine
+
+							if remainRequire <= 0 {
+								break
+							}
+						}
+					} else {
+						jitMats[cMat].JitDates[current].BeginStock = jitMats[cMat].JitDates[current-1].EstimateStock
+
+						if isStockPlant {
+							jitMats[cMat].JitDates[current].PlantSock = jitMats[cMat].JitDates[current].BeginStock
+						} else {
+							jitMats[cMat].JitDates[current].SubconStock = jitMats[cMat].JitDates[current].BeginStock
+						}
+					}
+
+					jitMats[cMat].JitDates[current].EstimateStock = calculateEstimateStock(&jitMats[cMat].JitDates[current])
+				}
+
+				continue
+			}
+
+			jitDate.EstimateStock = calculateEstimateStock(jitDate)
+		}
+	}
+
+	//Cal update prod and estimate
+	for cMat := range jitMats {
+		isStockPlant := true
+
+		for cDate := range jitMats[cMat].JitDates {
+			jitDate := &jitMats[cMat].JitDates[cDate]
+
+			if cDate == 0 {
+				jitDate.BeginStock = jitMats[cMat].Stock.StockPlantQty + jitMats[cMat].Stock.StockSubconQty
+
+				if jitMats[cMat].Stock.StockPlantQty == 0 && jitMats[cMat].Stock.StockSubconQty > 0 {
+					isStockPlant = false
+				}
+
+				jitDate.PlantSock = jitMats[cMat].Stock.StockPlantQty
+				jitDate.SubconStock = jitMats[cMat].Stock.StockSubconQty
+			} else {
+				jitDate.BeginStock = jitMats[cMat].JitDates[cDate-1].EstimateStock
+
+				if isStockPlant {
+					jitDate.PlantSock = jitDate.BeginStock
+				} else {
+					jitDate.SubconStock = jitDate.BeginStock
+				}
+			}
+
 			//Require Case
-			if jitDate.BeginStock-jitDate.ProductionQty < 0 {
+			if jitDate.BeginStock-jitDate.ProductionQtyFromPlant < 0 {
 				var palletPattern float64 = 0
 
 				if material, exists := materialMap[jitMats[cMat].MaterialCode]; exists {
@@ -1421,7 +1607,7 @@ func CalculateEstimate(jitMats []JitMaterial, adjustLeadtimeMap map[string]Adjus
 
 				isUrgent := false
 				leadTime := jitMats[cMat].LeadTime
-				requireQty := math.Abs(jitDate.BeginStock - jitDate.ProductionQty)
+				requireQty := math.Abs(jitDate.BeginStock - jitDate.ProductionQtyFromPlant)
 				requireQty = math.Ceil(requireQty/palletPattern) * palletPattern
 				currentDateCount := int64(cDate)
 				startUpdateData := currentDateCount - leadTime
@@ -1859,11 +2045,11 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
-	_, err := db.ExecuteQuery(sqlx, sql)
-	if err != nil {
-		return fmt.Errorf("failed to push process id to require: %w", err)
-	}
+	// sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
+	// _, err := db.ExecuteQuery(sqlx, sql)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to push process id to require: %w", err)
+	// }
 
 	return nil
 }
