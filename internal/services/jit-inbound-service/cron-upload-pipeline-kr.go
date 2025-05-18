@@ -324,36 +324,36 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 
 	plans = append(plans, notExistsPlans...)
 
-	// ClearStock(gormx)
+	ClearStock(gormx)
 
-	// updateFunc := func(gorm *gorm.DB, matUpdateItems []MaterialStock) {
-	// 	tx := gorm.Begin()
+	updateFunc := func(gorm *gorm.DB, matUpdateItems []MaterialStock) {
+		tx := gorm.Begin()
 
-	// 	for _, matUpdate := range matUpdateItems {
-	// 		tx.Table("materials").Where("material_code = ?", matUpdate.MaterialCode).Updates(map[string]any{
-	// 			"current_qty":  matUpdate.StockPlantQty + matUpdate.StockSubconQty,
-	// 			"updated_date": time.Now().Format(time.DateTime),
-	// 		})
-	// 	}
+		for _, matUpdate := range matUpdateItems {
+			tx.Table("materials").Where("material_code = ?", matUpdate.MaterialCode).Updates(map[string]any{
+				"current_qty":  matUpdate.StockPlantQty + matUpdate.StockSubconQty,
+				"updated_date": time.Now().Format(time.DateTime),
+			})
+		}
 
-	// 	err := tx.Commit().Error
-	// 	if err != nil {
-	// 		tx.Rollback()
-	// 	}
+		err := tx.Commit().Error
+		if err != nil {
+			tx.Rollback()
+		}
 
-	// }
+	}
 
-	// var matUpdateList []MaterialStock
+	var matUpdateList []MaterialStock
 
-	// for index, matItem := range matStock {
+	for index, matItem := range matStock {
 
-	// 	matUpdateList = append(matUpdateList, matItem)
+		matUpdateList = append(matUpdateList, matItem)
 
-	// 	if len(matUpdateList) >= 500 || index == len(matStock)-1 {
-	// 		updateFunc(gormx, matUpdateList)
-	// 		matUpdateList = []MaterialStock{}
-	// 	}
-	// }
+		if len(matUpdateList) >= 500 || index == len(matStock)-1 {
+			updateFunc(gormx, matUpdateList)
+			matUpdateList = []MaterialStock{}
+		}
+	}
 
 	uploadPlan := UploadPlanRequest{}
 	uploadPlan.StartCal = startCalDate
