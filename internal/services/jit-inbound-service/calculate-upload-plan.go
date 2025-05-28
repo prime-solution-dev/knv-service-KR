@@ -2045,11 +2045,11 @@ func CreateJitDaily(gormx *gorm.DB, sqlx *sqlx.DB, jitProcesses []JitProcess, ji
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
-	_, err := db.ExecuteQuery(sqlx, sql)
-	if err != nil {
-		return fmt.Errorf("failed to push process id to require: %w", err)
-	}
+	// sql := fmt.Sprintf("select jit_send_daily_required_email('{%s}')", strings.Join(allProcessidInsert, ","))
+	// _, err := db.ExecuteQuery(sqlx, sql)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to push process id to require: %w", err)
+	// }
 
 	return nil
 }

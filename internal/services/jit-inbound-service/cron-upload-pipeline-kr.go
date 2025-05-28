@@ -324,36 +324,36 @@ func ProcessUploadPipelineKr(startFileDate, startCalDate time.Time, stockPath st
 
 	plans = append(plans, notExistsPlans...)
 
-	ClearStock(gormx)
+	// ClearStock(gormx)
 
-	updateFunc := func(gorm *gorm.DB, matUpdateItems []MaterialStock) {
-		tx := gorm.Begin()
+	// updateFunc := func(gorm *gorm.DB, matUpdateItems []MaterialStock) {
+	// 	tx := gorm.Begin()
 
-		for _, matUpdate := range matUpdateItems {
-			tx.Table("materials").Where("material_code = ?", matUpdate.MaterialCode).Updates(map[string]any{
-				"current_qty":  matUpdate.StockPlantQty + matUpdate.StockSubconQty,
-				"updated_date": time.Now().Format(time.DateTime),
-			})
-		}
+	// 	for _, matUpdate := range matUpdateItems {
+	// 		tx.Table("materials").Where("material_code = ?", matUpdate.MaterialCode).Updates(map[string]any{
+	// 			"current_qty":  matUpdate.StockPlantQty + matUpdate.StockSubconQty,
+	// 			"updated_date": time.Now().Format(time.DateTime),
+	// 		})
+	// 	}
 
-		err := tx.Commit().Error
-		if err != nil {
-			tx.Rollback()
-		}
+	// 	err := tx.Commit().Error
+	// 	if err != nil {
+	// 		tx.Rollback()
+	// 	}
 
-	}
+	// }
 
-	var matUpdateList []MaterialStock
+	// var matUpdateList []MaterialStock
 
-	for index, matItem := range matStock {
+	// for index, matItem := range matStock {
 
-		matUpdateList = append(matUpdateList, matItem)
+	// 	matUpdateList = append(matUpdateList, matItem)
 
-		if len(matUpdateList) >= 500 || index == len(matStock)-1 {
-			updateFunc(gormx, matUpdateList)
-			matUpdateList = []MaterialStock{}
-		}
-	}
+	// 	if len(matUpdateList) >= 500 || index == len(matStock)-1 {
+	// 		updateFunc(gormx, matUpdateList)
+	// 		matUpdateList = []MaterialStock{}
+	// 	}
+	// }
 
 	uploadPlan := UploadPlanRequest{}
 	uploadPlan.StartCal = startCalDate
@@ -426,12 +426,18 @@ func ReadPlan(datas []map[string]interface{}, matStockMap map[string]MaterialSto
 		materialCode := data["Col2"].(string)
 		lineCode := ""
 		subconStockQtyStr := data["Col9"].(string)
+		plantStockQtyStr := data["Col9"].(string)
 		condition := data["Col11"].(string)
 		numColumns := len(data)
 		startCol := 11
 		endCol := numColumns
 
 		subconStockQty, err := strconv.ParseFloat(subconStockQtyStr, 64)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error parsing float: %w", err)
+		}
+
+		plantStockQty, err := strconv.ParseFloat(plantStockQtyStr, 64)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error parsing float: %w", err)
 		}
@@ -451,6 +457,7 @@ func ReadPlan(datas []map[string]interface{}, matStockMap map[string]MaterialSto
 		}
 
 		matStock.StockSubconQty = subconStockQty
+		matStock.StockPlantQty = plantStockQty
 		matStockMap[matStockKey] = matStock
 
 		for i := startCol; i < endCol; i++ {

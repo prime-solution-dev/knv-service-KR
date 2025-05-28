@@ -1,0 +1,4 @@
+
+update jit_daily set updated_date = '20250527 04:00', created_date = '20250527 04:00';
+update jit_process set updated_date = '20250527 04:00', created_date = '20250527 04:00';
+update materials set updated_date = '20250527 04:00', created_date = '20250527 04:00';
