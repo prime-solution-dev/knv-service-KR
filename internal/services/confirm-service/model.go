@@ -13,6 +13,7 @@ const (
 	customDateFormatFive      = "1/02/2006"
 	customDateFormatSix       = "01/02/2006"
 	customDateFormatSeven     = "1/2/2006"
+	customDateFormatEight     = "02-Jan"
 )
 
 type CustomDate time.Time
@@ -45,7 +46,10 @@ func (cd *CustomDate) UnmarshalJSON(b []byte) error {
 					if err != nil {
 						t, err = time.Parse(customDateFormatSix, str)
 						if err != nil {
-							cd = nil
+							t, err = time.Parse(customDateFormatEight, str)
+							if err != nil {
+								cd = nil
+							}
 						}
 					}
 				}

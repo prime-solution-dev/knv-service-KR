@@ -27,6 +27,7 @@ func validateDateFormat(value string) bool {
 		customDateFormatFive,
 		customDateFormatSix,
 		customDateFormatSeven,
+		customDateFormatEight,
 	}
 
 	for _, layout := range formatChecks {
