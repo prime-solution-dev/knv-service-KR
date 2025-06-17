@@ -999,7 +999,7 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 			// 	ignoreWeeks[weekKey] = true
 			// }
 
-			jitMatDateKey := fmt.Sprintf(`%s|%s`, materialCode, planDateStr)
+			jitMatDateKey := fmt.Sprintf(`%s|%s|%s`, planDateStr, materialCode, jitLine.LineCode)
 			if _, exist := jitMatDate[jitMatDateKey]; !exist && jitLine.ProductionQty > 0 {
 				jitMatDate[jitMatDateKey] = true
 			}
@@ -1009,12 +1009,17 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 	for jitLineDBKey, jitLineDBs := range jitLineDBMap {
 		for _, jitLineDB := range jitLineDBs {
 			dbMaterialCode := jitLineDB.MaterialCode
-			// dbPlanDate := jitLineDB.DailyDate
-			// dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+			dbPlanDate := jitLineDB.DailyDate
+			dbPlanDateStr := dbPlanDate.Truncate(24 * time.Hour).Format(`2006-01-02`)
+			dbLineCode := jitLineDB.LineCode
+
 			productionQty := 0.0
 			productionPlantQty := 0.0
 			productionSubconQty := 0.0
 			var planId *int64
+
+			confirmQTY := float64(0)
+			confirmUrgentQTY := float64(0)
 
 			// jitMatDateKey := fmt.Sprintf(`%s|%s`, dbMaterialCode, dbPlanDateStr)
 			// _, jitMatDateExist := jitMatDate[jitMatDateKey]
@@ -1033,13 +1038,18 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 				} else {
 					continue
 				}
+			} else {
+				jitMatDateKey := fmt.Sprintf(`%s|%s|%s`, dbPlanDateStr,dbMaterialCode, dbLineCode)
+				if _, exist := jitLineMap[jitMatDateKey]; !exist {
+					confirmQTY = jitLineDB.ConfirmRequireQty
+					confirmUrgentQTY = jitLineDB.ConfirmUrgentQty
+				}
 			}
-
 			if productionQty > 0 {
 				planId = jitLineDB.PlanId
 			}
 
-			if productionQty == 0 && jitLineDB.ConfirmRequireQty == 0 && jitLineDB.ConfirmUrgentQty == 0 {
+			if productionQty == 0 && confirmQTY == 0 && confirmUrgentQTY == 0 {
 				continue
 			}
 
@@ -1054,8 +1064,8 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 				ProductionSubconQty: productionSubconQty,
 				RequireQty:          0,
 				UrgenQty:            0,
-				ConfirmRequireQty:   jitLineDB.ConfirmRequireQty,
-				ConfirmUrgentQty:    jitLineDB.ConfirmUrgentQty,
+				ConfirmRequireQty:   confirmQTY,
+				ConfirmUrgentQty:    confirmUrgentQTY,
 				ConfirmRequireDate:  jitLineDB.ConfirmRequireDate,
 				ConfirmUrgentDate:   jitLineDB.ConfirmUrgentDate,
 				LeadTime:            jitLineDB.LeadTime,
