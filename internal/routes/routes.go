@@ -59,4 +59,8 @@ func RegisterRoutes(router *gin.Engine) {
 		utils.ProcessRequestPayload(c, jitInboundService.ManualKrPipeline)
 	})
 
+	router.GET("/JITInbound/test-time", func(c *gin.Context) {
+		utils.ProcessRequestPayload(c, jitInboundService.TestTime)
+	})
+
 }
