@@ -87,7 +87,8 @@ func CalculateUploadPlan(req UploadPlanRequest) (interface{}, error) {
 	startDate := req.StartCal
 	startDateStr := startDate.Format("2006-01-02")
 	println((startDateStr))
-	endDate := time.Now().Truncate(24 * time.Hour)
+	now := time.Now()
+	endDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
 	isBom := req.IsBom
 	isCheckFg := req.IsCheckFg
@@ -1039,7 +1040,7 @@ func MergeJitDaily(startDate time.Time, jitLineMap map[string][]JitLine, jitLine
 					continue
 				}
 			} else {
-				jitMatDateKey := fmt.Sprintf(`%s|%s|%s`, dbPlanDateStr,dbMaterialCode, dbLineCode)
+				jitMatDateKey := fmt.Sprintf(`%s|%s|%s`, dbPlanDateStr, dbMaterialCode, dbLineCode)
 				if _, exist := jitLineMap[jitMatDateKey]; !exist {
 					confirmQTY = jitLineDB.ConfirmRequireQty
 					confirmUrgentQTY = jitLineDB.ConfirmUrgentQty

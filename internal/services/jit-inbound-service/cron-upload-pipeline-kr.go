@@ -54,9 +54,9 @@ func UploadPlanPipelineKrCron() {
 	defer sqlx.Close()
 
 	filePath := os.Getenv("kr_file_path")
+	now := time.Now()
+	startFileDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	startCalDateFromDb := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
-	// startFileDate := startCalDateFromDb
-	startFileDate := time.Now().Truncate(24 * time.Hour)
 	startCalDate := startCalDateFromDb
 	stockPath := filePath
 	stockPrefixFile := `LX02_`
@@ -145,9 +145,9 @@ func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
 	defer sqlx.Close()
 
 	filePath := os.Getenv("kr_file_path")
-	startFileDate := time.Now().Truncate(24 * time.Hour)
+	now := time.Now()
+	startFileDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 	startCalDateFromDb := GetStartCalDateKr(sqlx).Truncate(24 * time.Hour)
-	// startFileDate := startCalDateFromDb
 	startCalDate := startCalDateFromDb
 	stockPath := filePath
 	stockPrefixFile := `LX02_`
@@ -156,7 +156,7 @@ func ManualKrPipeline(c *gin.Context, jsonPayload string) (interface{}, error) {
 
 	err := processGetFiles(filePath, stockPrefixFile, planPrefixFile)
 	if err != nil {
-		return nil, fmt.Errorf(fmt.Sprintf("can't get file : %w", err))
+		return nil, fmt.Errorf("can't get file : %w", err)
 	} else {
 		if err := ProcessUploadPipelineKr(startFileDate, startCalDate, stockPath, stockPrefixFile, planPath, planPrefixFile); err != nil {
 			return nil, err
